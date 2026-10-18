@@ -87,7 +87,7 @@ offline
 
 ## Copyright and trademark info
 
-© 2026 <your publisher display name>. yt-dlp (Unlicense) and FFmpeg (LGPL/GPL) are independent open-source projects, downloaded from their official sources at the user's request.
+© 2026 Iradukunda Bertin. yt-dlp (Unlicense) and FFmpeg (LGPL/GPL) are independent open-source projects, downloaded from their official sources at the user's request.
 
 ## Notes for certification (Submission options → Notes for certification)
 

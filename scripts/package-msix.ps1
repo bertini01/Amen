@@ -121,5 +121,5 @@ Write-Host "Packed $package (version $version, identity $($identity.IdentityName
 
 if ($Register) {
     Add-AppxPackage -Register (Join-Path $layout "AppxManifest.xml")
-    Write-Host "Registered for this user. Launch 'Amen' from Start."
+    Write-Host "Registered for this user. Launch '$($identity.DisplayName)' from Start."
 }
