@@ -1,6 +1,6 @@
 {
   "_comment": "DisplayName is the name you reserved in Partner Center (it must match exactly). The other three come from Partner Center > your MSIX app > Product management > Product identity. They are public (they appear in every installed package), not secrets.",
-  "DisplayName": "REPLACE_ME (reserved app name, e.g. Amen Studio)",
+  "DisplayName": "Amen Studio",
   "IdentityName": "REPLACE_ME (Package/Identity/Name)",
   "Publisher": "REPLACE_ME (Package/Identity/Publisher, starts with CN=)",
   "PublisherDisplayName": "REPLACE_ME (Package/Properties/PublisherDisplayName)"

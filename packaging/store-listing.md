@@ -1,6 +1,6 @@
 # Microsoft Store listing — copy into Partner Center
 
-Where it says **Amen**, use the exact name you reserved (for example "Amen Studio").
+App name (reserved): **Amen Studio**. It must match the package display name exactly.
 Field limits are Partner Center's.
 
 ## Properties
@@ -23,13 +23,13 @@ Field limits are Partner Center's.
 
 ## Short description (shown at the top of the listing)
 
-Save the audio and video you love, then shape it into your own mix. Amen downloads, converts and edits entirely on your PC, with no account and no cloud.
+Save the audio and video you love, then shape it into your own mix. Amen Studio downloads, converts and edits entirely on your PC, with no account and no cloud.
 
 ## Description
 
-Amen is a private, offline-first audio studio and media saver for Windows.
+Amen Studio is a private, offline-first audio studio and media saver for Windows.
 
-Paste a link, choose MP3 or MP4 and the quality you want, and Amen saves it to your PC with the title, artist and cover art already filled in. Then open it in the built-in Audio Studio to cut clips, arrange them on a multi-track timeline and export your own mix.
+Paste a link, choose MP3 or MP4 and the quality you want, and Amen Studio saves it to your PC with the title, artist and cover art already filled in. Then open it in the built-in Audio Studio to cut clips, arrange them on a multi-track timeline and export your own mix.
 
 Everything happens on your computer. There is no account, no advertising, no tracking, and no file ever passes through an online converter.
 
@@ -91,7 +91,7 @@ offline
 
 ## Notes for certification (Submission options → Notes for certification)
 
-Amen is a Win32 desktop app (Tauri / WebView2) packaged as MSIX. It needs the runFullTrust capability to run as a desktop app and to start its media engines as child processes.
+Amen Studio is a Win32 desktop app (Tauri / WebView2) packaged as MSIX. It needs the runFullTrust capability to run as a desktop app and to start its media engines as child processes.
 
 On first launch the app may report that yt-dlp and FFmpeg are not installed. Open Diagnostics and choose Install: they are downloaded from their official sources (github.com/yt-dlp and gyan.dev) into the app's own data folder. No other code is downloaded.
 
@@ -101,7 +101,7 @@ No account or login is required.
 
 ## Screenshots
 
-Upload the PNGs from `packaging/store-screenshots/` in their numbered order (1600×900, desktop). The Studio shot goes first on purpose: it presents Amen as a creative tool.
+Upload the PNGs from `packaging/store-screenshots/` in their numbered order (1600×900, desktop). The Studio shot goes first on purpose: it presents Amen Studio as a creative tool.
 
 Captions:
 1. Arrange clips across tracks in the built-in Audio Studio
@@ -111,4 +111,4 @@ Captions:
 
 ## Restricted capability justification (runFullTrust)
 
-Amen is a desktop (Win32) application packaged as MSIX. Full trust is required to run the desktop executable and to launch its bundled media tools (yt-dlp and FFmpeg) as child processes.
+Amen Studio is a desktop (Win32) application packaged as MSIX. Full trust is required to run the desktop executable and to launch its bundled media tools (yt-dlp and FFmpeg) as child processes.
