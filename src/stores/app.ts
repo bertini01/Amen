@@ -85,7 +85,7 @@ export const useAppStore = create<AppState>((set) => ({
             const { toast } = await import("@/stores/toast");
             toast(
                "yt-dlp update available",
-               `A newer version (${info.latest}) is available — you have ${info.current}. Update it in Diagnostics to keep YouTube downloads working reliably.`,
+               `A newer version (${info.latest}) is available — you have ${info.current}. Update it in Diagnostics to keep downloads working reliably.`,
                "info",
             );
          }

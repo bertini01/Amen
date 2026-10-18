@@ -17,7 +17,7 @@
     ProcessorArchitecture="x64" />
 
   <Properties>
-    <DisplayName>Amen</DisplayName>
+    <DisplayName>{{DisplayName}}</DisplayName>
     <PublisherDisplayName>{{PublisherDisplayName}}</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
     <Description>Local media downloader and audio studio powered by yt-dlp and FFmpeg.</Description>
@@ -35,7 +35,7 @@
   <Applications>
     <Application Id="Amen" Executable="amen.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
-        DisplayName="Amen"
+        DisplayName="{{DisplayName}}"
         Description="Local media downloader and audio studio powered by yt-dlp and FFmpeg."
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"

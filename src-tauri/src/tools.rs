@@ -3,6 +3,7 @@ use crate::error::{AppError, AppResult};
 use crate::process::{new_command, run_capture};
 use serde::Serialize;
 use std::io::{Read, Write};
+use std::net::ToSocketAddrs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -255,18 +256,23 @@ pub fn free_disk_space(path: &Path) -> Option<u64> {
 
 fn check_network() -> NetworkCheck {
     let hosts: [(&str, u16); 3] = [
-        ("www.youtube.com", 443),
         ("github.com", 443),
         ("www.gstatic.com", 443),
+        ("www.youtube.com", 443),
     ];
     let mut last_error: Option<String> = None;
     for (host, port) in hosts {
         let start = Instant::now();
-        let addr = format!("{host}:{port}");
-        match std::net::TcpStream::connect_timeout(
-            &addr.parse().unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap()),
-            Duration::from_secs(5),
-        ) {
+        // `SocketAddr::parse` only accepts IP literals, so a hostname has to go
+        // through DNS first; parsing it directly made this check always fail.
+        let addr = match (host, port).to_socket_addrs().ok().and_then(|mut a| a.next()) {
+            Some(addr) => addr,
+            None => {
+                last_error = Some(format!("could not resolve {host}"));
+                continue;
+            }
+        };
+        match std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)) {
             Ok(_) => {
                 return NetworkCheck {
                     ok: true,

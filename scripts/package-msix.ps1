@@ -48,10 +48,10 @@ $version = "$($parts -join '.').0"
 
 # --- Identity -----------------------------------------------------------------
 if ($Dev) {
-    $identity = @{ IdentityName = "Amen.Dev"; Publisher = "CN=AmenDev"; PublisherDisplayName = "Amen (dev)" }
+    $identity = @{ DisplayName = "Amen (dev)"; IdentityName = "Amen.Dev"; Publisher = "CN=AmenDev"; PublisherDisplayName = "Amen (dev)" }
 } else {
     $identity = Get-Content (Join-Path $msixDir "store-identity.json") -Raw | ConvertFrom-Json
-    foreach ($key in "IdentityName", "Publisher", "PublisherDisplayName") {
+    foreach ($key in "DisplayName", "IdentityName", "Publisher", "PublisherDisplayName") {
         if ($identity.$key -like "REPLACE_ME*") {
             throw "Fill in '$key' in packaging\msix\store-identity.json from Partner Center (or pass -Dev for a local build)."
         }
@@ -99,7 +99,8 @@ try {
 } finally { $source.Dispose() }
 
 $manifest = Get-Content (Join-Path $msixDir "AppxManifest.xml") -Raw
-$manifest = $manifest.Replace("{{IdentityName}}", $identity.IdentityName).
+$manifest = $manifest.Replace("{{DisplayName}}", [System.Security.SecurityElement]::Escape($identity.DisplayName)).
+    Replace("{{IdentityName}}", $identity.IdentityName).
     Replace("{{Publisher}}", [System.Security.SecurityElement]::Escape($identity.Publisher)).
     Replace("{{PublisherDisplayName}}", [System.Security.SecurityElement]::Escape($identity.PublisherDisplayName)).
     Replace("{{Version}}", $version)

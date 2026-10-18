@@ -88,7 +88,7 @@ export function UrlBar({ onAnalyze, analyzing, disabled }: UrlBarProps) {
                value={value}
                onChange={(e) => setValue(e.target.value)}
                onKeyDown={(e) => e.key === "Enter" && handleAnalyze()}
-               placeholder="Paste a supported media URL — YouTube, SoundCloud, Vimeo, and more…"
+               placeholder="Paste a link to music or video you have the right to save…"
                spellCheck={false}
                disabled={disabled || analyzing}
                className="h-10 flex-1 bg-transparent text-[15px] text-foreground outline-none placeholder:text-muted-foreground/60 disabled:opacity-60"
