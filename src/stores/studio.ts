@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/utils";
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import type {
@@ -13,6 +14,8 @@ import { itemEffectiveDuration, itemSpan } from "../lib/studioTypes";
 import { formatTime } from "../lib/studioTime";
 import { studioApi, assetUrl } from "../lib/api";
 import { nanoid } from "nanoid";
+import { toast } from "./toast";
+import { useAppStore } from "./app";
 
 // ---- Types ------------------------------------------------------------------
 
@@ -72,6 +75,12 @@ export interface StudioStore {
    playback: PlaybackState;
    selection: SelectionState;
    waveformCache: Record<string, WaveformData>;
+   /** Source whose waveform is being extracted right now, if any. */
+   waveformLoadingId: string | null;
+   /** The last waveform extraction that failed, shown inline with a Retry. */
+   waveformError: { sourceId: string; message: string } | null;
+   /** True while the timeline preview mix is being rendered. */
+   previewRendering: boolean;
    loadingState: "idle" | "loading" | "saving";
 
    // Actions: Project lifecycle
@@ -83,7 +92,8 @@ export interface StudioStore {
    renameProject: (name: string) => void;
 
    // Actions: Sources
-   addSource: (path: string) => Promise<void>;
+   /** Probe and add an audio file, returning the new source's id. Throws a readable error on failure. */
+   addSource: (path: string) => Promise<string>;
    removeSource: (id: string) => void;
    selectSource: (id: string) => Promise<void>;
    getSourceWaveform: (id: string) => Promise<WaveformData | null>;
@@ -163,7 +173,9 @@ export interface StudioStore {
    toggleLoop: () => void;
 
    // Actions: Rendering
+   /** Render the timeline mix for playback. Never throws: failures are toasted and leave the preview stale, so "Update Preview" stays available as the retry. */
    renderPreview: () => Promise<void>;
+   /** Export the mix. Resolves null only when no project is open; render failures throw a readable error. */
    exportMix: (
       outputPath: string,
       format: string,
@@ -328,6 +340,9 @@ export const useStudioStore = create<StudioStore>()(
          selectedItemIndex: null,
       },
       waveformCache: {},
+      waveformLoadingId: null,
+      waveformError: null,
+      previewRendering: false,
       loadingState: "idle",
 
       // ---- Project Lifecycle --------------------------------------------------
@@ -365,6 +380,8 @@ export const useStudioStore = create<StudioStore>()(
                looping: false,
             };
             state.waveformCache = {};
+            state.waveformLoadingId = null;
+            state.waveformError = null;
             state.loadingState = "idle";
          });
       },
@@ -397,6 +414,8 @@ export const useStudioStore = create<StudioStore>()(
                   selectedItemTrackId: null,
                   selectedItemIndex: null,
                };
+               state.waveformLoadingId = null;
+               state.waveformError = null;
                state.loadingState = "idle";
             });
          } catch (e) {
@@ -478,7 +497,11 @@ export const useStudioStore = create<StudioStore>()(
             const info = await studioApi.probeAudio(path);
             const id = nanoid();
             set((state: StudioStore) => {
-               if (!state.project) return;
+               // Callers outside the Studio (Downloads, History) can get here
+               // before the Studio view has ever mounted. Dropping the source
+               // because no project exists yet is how "Open in Audio Studio"
+               // used to land on an empty workspace.
+               if (!state.project) state.project = createDefaultProject("Untitled Mix");
                pushHistory(state);
                state.project.sources.push({
                   id,
@@ -492,8 +515,9 @@ export const useStudioStore = create<StudioStore>()(
                });
                state.modified = true;
             });
+            return id;
          } catch (e) {
-            throw new Error(`Failed to add source: ${e}`);
+            throw new Error(errorMessage(e));
          }
       },
 
@@ -535,6 +559,9 @@ export const useStudioStore = create<StudioStore>()(
          const src = state.project?.sources.find((s) => s.id === id);
          set((state: StudioStore) => {
             state.selection.selectedSourceId = id;
+            // Never leave the PREVIOUS source's waveform on screen under the
+            // new source's name while this one loads (or if it fails to).
+            state.selection.selectedSourceWaveform = state.waveformCache[id] ?? null;
             state.selection.selectionStart = null;
             state.selection.selectionEnd = null;
             // Switch to source playback mode and set source path
@@ -563,17 +590,27 @@ export const useStudioStore = create<StudioStore>()(
             });
             return state.waveformCache[id];
          }
+         set((s: StudioStore) => {
+            s.waveformLoadingId = id;
+            if (s.waveformError?.sourceId === id) s.waveformError = null;
+         });
          try {
             const wf = await studioApi.waveform(src.path, 10);
             set((s: StudioStore) => {
                s.waveformCache[id] = wf;
+               if (s.waveformLoadingId === id) s.waveformLoadingId = null;
                if (s.selection.selectedSourceId === id) {
                   s.selection.selectedSourceWaveform = wf;
                }
             });
             return wf;
          } catch (e) {
-            console.error("Waveform extract failed:", e);
+            // Previously console-only, so the editor just stayed blank. The
+            // reason is now shown inline in the editor pane with a Retry.
+            set((s: StudioStore) => {
+               if (s.waveformLoadingId === id) s.waveformLoadingId = null;
+               s.waveformError = { sourceId: id, message: errorMessage(e) };
+            });
             return null;
          }
       },
@@ -1113,6 +1150,9 @@ export const useStudioStore = create<StudioStore>()(
          // (that clearing is exactly right when a user manually picks a
          // source, but would immediately erase the label we're about to set).
          set((s: StudioStore) => {
+            if (s.selection.selectedSourceId !== clip.sourceId) {
+               s.selection.selectedSourceWaveform = s.waveformCache[clip.sourceId] ?? null;
+            }
             s.selection.selectedSourceId = clip.sourceId;
             s.playback.mode = "source";
             s.playback.sourcePlaybackPath = src.path;
@@ -1178,9 +1218,10 @@ export const useStudioStore = create<StudioStore>()(
 
       renderPreview: async () => {
          const state = get();
-         if (!state.project) return;
+         if (!state.project || state.previewRendering) return;
          try {
             set((s: StudioStore) => {
+               s.previewRendering = true;
                s.playback.previewStale = true;
                s.playback.mode = "timeline"; // Switch to timeline mode for preview
                // The timeline mix is the whole arrangement; a source-domain
@@ -1197,12 +1238,16 @@ export const useStudioStore = create<StudioStore>()(
                s.playback.previewPath = assetUrl(result.path);
                s.playback.previewStale = false;
                s.playback.playhead = 0; // Reset playhead
+               s.previewRendering = false;
             });
          } catch (e) {
-            console.error("Preview render failed:", e);
+            // Leave the preview marked stale: that keeps "Update Preview" on
+            // screen as the retry, instead of pretending the mix is current.
             set((s: StudioStore) => {
-               s.playback.previewStale = false;
+               s.playback.previewStale = true;
+               s.previewRendering = false;
             });
+            toast("Couldn't render the timeline preview", errorMessage(e), "destructive");
          }
       },
 
@@ -1221,8 +1266,9 @@ export const useStudioStore = create<StudioStore>()(
                bitrateKbps,
             );
          } catch (e) {
-            console.error("Export failed:", e);
-            return null;
+            // Returning null here used to collapse every failure into a
+            // generic "Export failed"; the caller now gets the real reason.
+            throw new Error(errorMessage(e));
          }
       },
 
@@ -1248,8 +1294,7 @@ export const useStudioStore = create<StudioStore>()(
                bitrateKbps,
             );
          } catch (e) {
-            console.error("Clip export failed:", e);
-            return null;
+            throw new Error(errorMessage(e));
          }
       },
 
@@ -1324,3 +1369,73 @@ export const useStudioStore = create<StudioStore>()(
       },
    })),
 );
+
+// ---- Shared entry points ----------------------------------------------------
+
+/** Audio formats the Studio imports (matches the Import dialog's filter). */
+export const AUDIO_EXTENSIONS = ["mp3", "wav", "flac", "m4a", "aac", "ogg"] as const;
+
+/** True when the path ends in one of {@link AUDIO_EXTENSIONS} (case-insensitive). */
+export function isAudioPath(path: string): boolean {
+   const name = path.split(/[\\/]/).pop() ?? "";
+   const dot = name.lastIndexOf(".");
+   if (dot <= 0) return false;
+   const ext = name.slice(dot + 1).toLowerCase();
+   return (AUDIO_EXTENSIONS as readonly string[]).includes(ext);
+}
+
+/** Split dropped/picked paths into importable audio files and everything else. */
+export function partitionAudioPaths(paths: string[]): { audio: string[]; rejected: string[] } {
+   const audio: string[] = [];
+   const rejected: string[] = [];
+   for (const p of paths) (isAudioPath(p) ? audio : rejected).push(p);
+   return { audio, rejected };
+}
+
+function fileName(path: string): string {
+   return path.split(/[\\/]/).pop() || path;
+}
+
+/**
+ * Import audio files into the open project, toasting every failure with its
+ * real reason (they used to reach only the console). Resolves with the ids of
+ * the sources that were added.
+ */
+export async function importAudioFiles(paths: string[]): Promise<string[]> {
+   const added: string[] = [];
+   for (const path of paths) {
+      try {
+         added.push(await useStudioStore.getState().addSource(path));
+      } catch (e) {
+         toast(`Couldn't import ${fileName(path)}`, errorMessage(e), "destructive");
+      }
+   }
+   return added;
+}
+
+/**
+ * The one way into the Studio from elsewhere in the app (Downloads, History):
+ * make sure a project exists, add the file (or reuse it if it's already a
+ * source), select it so its waveform shows, switch to the Studio, and say
+ * what happened either way.
+ */
+export async function openInStudio(path: string, title?: string | null): Promise<boolean> {
+   try {
+      const store = useStudioStore.getState();
+      if (!store.project) await store.newProject("Untitled Mix");
+      const existing = useStudioStore.getState().project?.sources.find((s) => s.path === path);
+      const id = existing ? existing.id : await useStudioStore.getState().addSource(path);
+      useAppStore.getState().setView("studio");
+      // The waveform loads in the background; its failure shows inline.
+      void useStudioStore.getState().selectSource(id);
+      toast(
+         existing ? "Already in Audio Studio" : "Opened in Audio Studio",
+         title || fileName(path),
+         "success",
+      );
+      return true;
+   } catch (e) {
+      toast("Couldn't open in Audio Studio", errorMessage(e), "destructive");
+      return false;
+   }
+}

@@ -30,6 +30,8 @@ export interface AppInfo {
    defaultOutputDir: string;
    platform: string;
    arch: string;
+   /** Set when running as the Microsoft Store (MSIX) package. */
+   packageFamilyName: string | null;
 }
 
 export interface AppSettings {
@@ -206,6 +208,8 @@ export interface DownloadRequest {
    playlistIndex?: number | null;
    duration?: number | null;
    extractor?: string | null;
+   /** Skip duplicate detection (History's "Download again"); never ends as "Skipped". */
+   force?: boolean;
 }
 
 export interface HistoryItem {
@@ -255,4 +259,33 @@ export interface SystemUsage {
    processMemMb: number;
    systemMemUsedMb: number;
    systemMemTotalMb: number;
+}
+
+/** A song as described by a copy-protected streaming service (see music_link.rs). */
+export interface MusicTrack {
+   title: string;
+   artists: string;
+   /** Seconds. */
+   duration: number | null;
+   /** What to search for to find this song on a site that allows saving. */
+   query: string;
+}
+
+/** The public description of a Spotify song, album or playlist link. */
+export interface MusicLink {
+   service: string;
+   kind: "track" | "album" | "playlist";
+   title: string;
+   subtitle: string | null;
+   cover: string | null;
+   url: string;
+   tracks: MusicTrack[];
+}
+
+/** Result of moving downloads out of accidental sub-folders. */
+export interface TidyReport {
+   found: number;
+   moved: number;
+   failed: string[];
+   removedFolders: number;
 }

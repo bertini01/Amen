@@ -544,9 +544,9 @@ pub fn render_mix(
     })
 }
 
-/// Cache directory for preview renders and waveforms.
+/// Cache directory for preview renders and waveforms (local, never roaming).
 pub fn cache_dir() -> PathBuf {
-    crate::config::app_data_dir().join("cache")
+    crate::config::cache_dir()
 }
 
 fn hash_project(project: &StudioProject) -> u64 {

@@ -42,40 +42,37 @@ export const useQueueStore = create<QueueState>((set, get) => ({
 
    remove: (id) => set({ jobs: get().jobs.filter((j) => j.id !== id) }),
 
+   // These four used to swallow backend errors, so the UI toasted
+   // "Cancelled" / "Re-queued" / "Cleared" for actions that never happened.
+   // They now rethrow (after re-syncing the queue) and callers report the
+   // real reason.
    cancel: async (id) => {
       try {
          await api.cancelDownload(id);
-      } catch {
-         /* surface via refresh */
+      } finally {
+         await get().refresh();
       }
-      await get().refresh();
    },
 
    retry: async (id) => {
       try {
          await api.retryDownload(id);
-      } catch {
-         /* surface via refresh */
+      } finally {
+         await get().refresh();
       }
-      await get().refresh();
    },
 
    removeJob: async (id) => {
-      try {
-         await api.removeJob(id);
-      } catch {
-         /* ignore */
-      }
+      await api.removeJob(id);
       get().remove(id);
    },
 
    clearCompleted: async () => {
       try {
          await api.clearCompletedJobs();
-      } catch {
-         /* ignore */
+      } finally {
+         await get().refresh();
       }
-      await get().refresh();
    },
 
    activeCount: () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isHttpUrl, normalizeUrl, looksLikePlaylist } from "@/lib/url";
+import { isHttpUrl, normalizeUrl, looksLikePlaylist, isSpotifyLink } from "@/lib/url";
 
 describe("isHttpUrl", () => {
    it("accepts http and https URLs", () => {
@@ -65,5 +65,18 @@ describe("looksLikePlaylist", () => {
       expect(looksLikePlaylist("https://www.youtube.com/watch?v=abc")).toBe(
          false,
       );
+   });
+});
+
+describe("isSpotifyLink", () => {
+   it("recognises Spotify songs, albums, playlists and short links", () => {
+      expect(isSpotifyLink("https://open.spotify.com/track/5S4dgXbimAi4uWAcVPuS0w?si=3e5f")).toBe(true);
+      expect(isSpotifyLink("https://open.spotify.com/intl-fr/album/4SZko61aMnmgvNhfhgTuD3")).toBe(true);
+      expect(isSpotifyLink("spotify:playlist:37i9dQZF1DXcBWIGoYBM5M")).toBe(true);
+      expect(isSpotifyLink("https://spotify.link/abc123")).toBe(true);
+   });
+   it("leaves other links and searches alone", () => {
+      expect(isSpotifyLink("https://www.youtube.com/watch?v=abc")).toBe(false);
+      expect(isSpotifyLink("spotify wagendanye natwe")).toBe(false);
    });
 });

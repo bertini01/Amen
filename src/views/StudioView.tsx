@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useStudioStore } from "../stores/studio";
+import {
+   AUDIO_EXTENSIONS,
+   importAudioFiles,
+   partitionAudioPaths,
+   useStudioStore,
+} from "../stores/studio";
 import { WaveformView } from "../components/WaveformView";
 import { PlayerBar } from "../components/PlayerBar";
 import { Timeline, type DropHover } from "../components/Timeline";
@@ -12,7 +17,8 @@ import {
    Save,
    RotateCcw,
    RotateCw,
-   Download,
+   FolderOpen,
+   FilePlus,
    Play,
    GripHorizontal,
    Repeat,
@@ -22,30 +28,20 @@ import {
    AlertTriangle,
    Loader2,
 } from "lucide-react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { save, open } from "../lib/dialog";
+import { api } from "../lib/api";
 import { formatTime, formatClock, formatDuration } from "../lib/studioTime";
 import { computeCompositionStats } from "../lib/studioTypes";
-import { appAlert, appConfirm } from "../stores/uiDialog";
-import { UiDialogHost } from "../components/UiDialogHost";
+import { appAlert, appChoose, appConfirm, useUiDialogStore } from "../stores/uiDialog";
 import { toast } from "../stores/toast";
+import { errorMessage } from "../lib/utils";
 
-/**
- * Readable text for anything thrown across the Tauri boundary. Rust errors
- * arrive as plain `{code, message, detail}` objects, not `Error` instances, so
- * `(e as Error).message` alone renders them as "undefined" or "[object Object]".
- */
-function errorMessage(e: unknown): string {
-   if (typeof e === "string") return e;
-   if (e && typeof e === "object") {
-      const o = e as { message?: unknown; detail?: unknown };
-      const msg = typeof o.message === "string" ? o.message : null;
-      const detail = typeof o.detail === "string" ? o.detail : null;
-      if (msg && detail && detail !== msg) return `${msg} — ${detail}`;
-      if (msg) return msg;
-      if (detail) return detail;
-   }
-   return "Unexpected error";
-}
+const AUDIO_FILTERS = [
+   { name: "Audio", extensions: [...AUDIO_EXTENSIONS] },
+   { name: "All", extensions: ["*"] },
+];
+
 
 const TIMELINE_FRACTION_KEY = "amen.studio.timelineFraction";
 /**
@@ -282,67 +278,129 @@ export function StudioView() {
    };
 
    const handleExportMix = async (format: string, bitrate: number) => {
+      const defaultExt = format.toLowerCase();
+      let path: string | null;
       try {
-         setExporting(true);
-         const defaultExt = format.toLowerCase();
-         const path = await save({
+         path = await save({
             defaultPath: `${store.project?.name || "mix"}.${defaultExt}`,
             filters: [{ name: format.toUpperCase(), extensions: [defaultExt] }],
          });
-         if (path) {
-            const result = await store.exportMix(path, format, bitrate);
-            if (result) {
-               setShowExportDialog(false);
-               // Show success with options to open
-               if (await appConfirm(`Export complete!\n\nFile: ${result.path}\nSize: ${(result.sizeBytes / 1024 / 1024).toFixed(2)} MB\nDuration: ${result.duration.toFixed(1)}s\n\nOpen the file now?`)) {
-                  try {
-                     const { openPath } = await import("@tauri-apps/plugin-opener");
-                     await openPath(result.path);
-                  } catch (e) {
-                     console.error("Failed to open file:", e);
-                  }
-               }
-            } else {
-               await appAlert("Export failed. Check the timeline and try again.");
-            }
-         }
-      } catch (e: any) {
-         console.error("Export failed:", e);
-         await appAlert(`Export failed: ${e?.message || e}`);
-      } finally {
+      } catch (e) {
+         toast("Couldn't open the save dialog", errorMessage(e), "destructive");
+         return;
+      }
+      if (!path) return; // user cancelled
+
+      setExporting(true);
+      let result: Awaited<ReturnType<typeof store.exportMix>>;
+      try {
+         result = await store.exportMix(path, format, bitrate);
+      } catch (e) {
          setExporting(false);
+         // The store now rethrows the renderer's real reason instead of a
+         // bare null, so the user learns WHY (missing source, disk full…).
+         await appAlert(`Export failed: ${errorMessage(e)}`, "Export failed");
+         return;
+      }
+      setExporting(false);
+      if (!result) {
+         await appAlert("Export failed: there is no project open.", "Export failed");
+         return;
+      }
+      setShowExportDialog(false);
+
+      const exported = result.path;
+      const name = exported.split(/[\\/]/).pop() ?? exported;
+      const sizeMb = (result.sizeBytes / 1024 / 1024).toFixed(1);
+      const choice = await appChoose(
+         `${name}\n${sizeMb} MB · ${formatClock(result.duration)}`,
+         [
+            { id: "reveal", label: "Show in folder" },
+            { id: "open", label: "Open file", primary: true },
+         ],
+         { title: "Export complete", cancelLabel: "Close" },
+      );
+      // Uses the app's own commands — the opener plugin's openPath isn't
+      // permitted by this app's capabilities, so it always failed silently.
+      try {
+         if (choice === "open") await api.openFile(exported);
+         else if (choice === "reveal") await api.revealInFolder(exported);
+      } catch (e) {
+         toast(
+            choice === "open" ? "Couldn't open the file" : "Couldn't show the file in its folder",
+            errorMessage(e),
+            "destructive",
+         );
       }
    };
 
-   // Drag and drop handlers
-   const handleDrag = (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (e.type === "dragenter" || e.type === "dragover") {
-         setDragActive(true);
-      } else if (e.type === "dragleave") {
-         setDragActive(false);
+   // ---- File drops (from Explorer) -----------------------------------------
+   // Tauri 2's native drag-drop handler swallows HTML5 file drops, and
+   // `File.path` only ever existed in Electron, so the old onDrop handler
+   // could never import anything. The webview's own drag-drop event carries
+   // real filesystem paths instead.
+   const [dropHasAudio, setDropHasAudio] = useState(true);
+
+   const importPaths = useCallback(async (paths: string[]) => {
+      const { audio, rejected } = partitionAudioPaths(paths);
+      if (rejected.length > 0) {
+         toast(
+            audio.length === 0 ? "Nothing to import" : `Skipped ${rejected.length} file${rejected.length === 1 ? "" : "s"}`,
+            `Only audio files can be imported (${AUDIO_EXTENSIONS.map((e) => e.toUpperCase()).join(", ")}).`,
+            "info",
+         );
       }
-   };
+      const added = await importAudioFiles(audio);
+      if (added.length > 1) toast(`Imported ${added.length} audio files`, undefined, "success");
+   }, []);
 
-   const handleDrop = async (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setDragActive(false);
-
-      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-         const files = Array.from(e.dataTransfer.files);
-         for (const file of files) {
-            const path = (file as any).path; // Electron/Tauri provides path
-            if (path && /\.(mp3|wav|flac|m4a|aac|ogg)$/i.test(path)) {
-               try {
-                  await store.addSource(path);
-               } catch (e) {
-                  console.error("Failed to import:", e);
+   useEffect(() => {
+      let disposed = false;
+      let unlisten: (() => void) | undefined;
+      try {
+         getCurrentWebview()
+            .onDragDropEvent((event) => {
+               const p = event.payload;
+               if (p.type === "enter") {
+                  setDropHasAudio(partitionAudioPaths(p.paths).audio.length > 0);
+                  setDragActive(true);
+               } else if (p.type === "over") {
+                  setDragActive(true);
+               } else if (p.type === "leave") {
+                  setDragActive(false);
+               } else if (p.type === "drop") {
+                  setDragActive(false);
+                  void importPaths(p.paths);
                }
-            }
-         }
+            })
+            .then((fn) => {
+               if (disposed) fn();
+               else unlisten = fn;
+            })
+            .catch(() => undefined);
+      } catch {
+         /* not running inside Tauri (plain browser) — no native file drops */
       }
+      return () => {
+         disposed = true;
+         unlisten?.();
+         setDragActive(false);
+      };
+   }, [importPaths]);
+
+   const handleImportAudio = async () => {
+      let selected: string | string[] | null;
+      try {
+         selected = await open({ directory: false, multiple: true, filters: AUDIO_FILTERS });
+      } catch (e) {
+         toast("Couldn't open the file picker", errorMessage(e), "destructive");
+         return;
+      }
+      if (!selected) return;
+      const paths = (Array.isArray(selected) ? selected : [selected]).filter(
+         (p): p is string => typeof p === "string",
+      );
+      await importAudioFiles(paths);
    };
 
    // Initialize with a new project if none exists
@@ -358,6 +416,9 @@ export function StudioView() {
    // Keyboard shortcuts for Studio
    useEffect(() => {
       const handleKeyDown = async (e: KeyboardEvent) => {
+         // A modal owns the keyboard: Space/Delete must not drive the
+         // transport or delete clips behind an open confirm dialog.
+         if (useUiDialogStore.getState().request) return;
          // Skip if user is typing in an input
          if (
             e.target instanceof HTMLInputElement ||
@@ -529,14 +590,10 @@ export function StudioView() {
             className={`studio-shell relative flex flex-col items-center justify-center h-full gap-5 bg-studio-bg text-studio-text p-8 text-center transition-colors ${
                dragActive ? "bg-studio-accent/10" : ""
             }`}
-            onDragEnter={handleDrag}
-            onDragLeave={handleDrag}
-            onDragOver={handleDrag}
-            onDrop={handleDrop}
          >
             <div
                className={`absolute inset-6 rounded-2xl border-2 border-dashed pointer-events-none transition-colors ${
-                  dragActive ? "border-studio-accent" : "border-transparent"
+                  dragActive ? (dropHasAudio ? "border-studio-accent" : "border-studio-danger") : "border-transparent"
                }`}
             />
             <img src="/logo.png" alt="Amen" className="w-16 h-16 mb-2 drop-shadow-xl opacity-95 animate-scale-in" />
@@ -547,45 +604,27 @@ export function StudioView() {
             </p>
             <div className="flex gap-3 mt-2">
                <button
-                  onClick={async () => {
-                     try {
-                        const selected = await open({
-                           directory: false,
-                           multiple: true,
-                           filters: [
-                              { name: "Audio", extensions: ["mp3", "wav", "flac", "m4a", "aac", "ogg"] },
-                              { name: "All", extensions: ["*"] }
-                           ]
-                        });
-                        if (selected) {
-                           const paths = Array.isArray(selected) ? selected : [selected];
-                           for (const path of paths) {
-                              if (typeof path === "string") {
-                                 await store.addSource(path);
-                              }
-                           }
-                        }
-                     } catch (e) {
-                        console.error("Import failed:", e);
-                     }
-                  }}
+                  onClick={handleImportAudio}
                   className="bg-studio-accent hover:brightness-110 text-white px-5 py-2.5 rounded-lg font-medium transition shadow-lg shadow-studio-accent/25 flex items-center gap-2"
                >
-                  <Plus size={18} />
+                  <FilePlus size={18} />
                   Import Audio
                </button>
                <button
                   onClick={handleOpenProject}
                   className="bg-studio-panel hover:bg-studio-raised border border-studio-border text-studio-text px-5 py-2.5 rounded-lg font-medium transition flex items-center gap-2"
                >
-                  <Download size={18} />
+                  <FolderOpen size={18} />
                   Open Project
                </button>
             </div>
-            <p className="text-studio-text-faint text-xs mt-6">
-               {dragActive ? "Drop audio files here" : "or drag audio files here"}
+            <p className={`text-xs mt-6 ${dragActive && !dropHasAudio ? "text-studio-danger" : "text-studio-text-faint"}`}>
+               {dragActive
+                  ? dropHasAudio
+                     ? "Drop audio files here"
+                     : "Only audio files can be imported"
+                  : "or drag audio files here"}
             </p>
-            <UiDialogHost />
          </div>
       );
    }
@@ -603,6 +642,7 @@ export function StudioView() {
    const currentSource = store.selection.selectedSourceId
       ? store.project.sources.find(s => s.id === store.selection.selectedSourceId)
       : undefined;
+   const waveformError = store.waveformError;
    const effectiveDuration = store.playback.mode === "source" && store.selection.selectedSourceId
       ? (currentSource?.duration || projectDuration)
       : projectDuration;
@@ -624,17 +664,22 @@ export function StudioView() {
    return (
       <div
          className="studio-shell relative flex flex-col h-full gap-2.5 p-2.5 bg-studio-bg text-studio-text overflow-hidden"
-         onDragEnter={handleDrag}
-         onDragLeave={handleDrag}
-         onDragOver={handleDrag}
-         onDrop={handleDrop}
       >
          {dragActive && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-studio-bg/90 backdrop-blur-sm border-4 border-studio-accent border-dashed pointer-events-none rounded-xl">
+            <div
+               data-testid="studio-drop-overlay"
+               className={`absolute inset-0 z-50 flex items-center justify-center bg-studio-bg/90 backdrop-blur-sm border-4 border-dashed pointer-events-none rounded-xl ${
+                  dropHasAudio ? "border-studio-accent" : "border-studio-danger"
+               }`}
+            >
                <div className="text-center">
-                  <Plus size={56} className="mx-auto mb-3 text-studio-accent" />
-                  <p className="text-xl font-semibold text-studio-text">Drop audio files here</p>
-                  <p className="text-studio-text-muted mt-1 text-sm">MP3, WAV, FLAC, M4A, AAC, OGG</p>
+                  <FilePlus size={56} className={`mx-auto mb-3 ${dropHasAudio ? "text-studio-accent" : "text-studio-danger"}`} />
+                  <p className="text-xl font-semibold text-studio-text">
+                     {dropHasAudio ? "Drop audio files to import" : "Only audio files can be imported"}
+                  </p>
+                  <p className="text-studio-text-muted mt-1 text-sm">
+                     {AUDIO_EXTENSIONS.map((e) => e.toUpperCase()).join(", ")}
+                  </p>
                </div>
             </div>
          )}
@@ -720,7 +765,7 @@ export function StudioView() {
                   className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 hover:bg-studio-raised transition text-[12px] text-studio-text-muted hover:text-studio-text"
                   title="Open project (Ctrl+O)"
                >
-                  <Download size={14} />
+                  <FolderOpen size={14} />
                   Open
                </button>
                <button
@@ -790,7 +835,9 @@ export function StudioView() {
                   <SourcePanel
                      sources={store.project.sources}
                      selectedSourceId={store.selection.selectedSourceId}
-                     onAddSource={(path) => store.addSource(path)}
+                     onAddSource={async (path) => {
+                        await importAudioFiles([path]);
+                     }}
                      onRemoveSource={async (id) => {
                         const affectedClips = store.project?.clips.filter((c) => c.sourceId === id).length ?? 0;
                         const message = affectedClips > 0
@@ -1011,6 +1058,34 @@ export function StudioView() {
                               </div>
                         </div>
                      </>
+                  ) : waveformError && waveformError.sourceId === store.selection.selectedSourceId ? (
+                     <div
+                        data-testid="waveform-error"
+                        className="flex-1 flex flex-col items-center justify-center gap-3 text-center bg-studio-panel rounded-xl border border-studio-danger/30 p-6"
+                     >
+                        <AlertTriangle size={22} className="text-studio-danger" />
+                        <div>
+                           <p className="text-[13px] font-medium text-studio-text">
+                              Couldn't load the waveform for {currentSource?.name ?? "this source"}
+                           </p>
+                           <p className="mt-1 max-w-md text-[12px] text-studio-text-muted break-words">
+                              {waveformError.message}
+                           </p>
+                        </div>
+                        <button
+                           onClick={() => store.getSourceWaveform(waveformError.sourceId)}
+                           className="flex items-center gap-1.5 rounded-lg bg-studio-raised hover:bg-white/10 border border-studio-border px-3 py-1.5 text-[12px] font-medium text-studio-text transition"
+                        >
+                           <RotateCw size={13} />
+                           Retry
+                        </button>
+                     </div>
+                  ) : store.selection.selectedSourceId &&
+                    store.waveformLoadingId === store.selection.selectedSourceId ? (
+                     <div className="flex-1 flex items-center justify-center gap-2 text-[13px] text-studio-text-muted bg-studio-panel rounded-xl border border-studio-border p-6">
+                        <Loader2 size={15} className="animate-spin" />
+                        Reading the waveform…
+                     </div>
                   ) : (
                      <div className="flex-1 flex items-center justify-center text-center text-[13px] text-studio-text-faint bg-studio-panel rounded-xl border border-studio-border p-6">
                         Pick a source on the left to see its waveform, then drag
@@ -1052,8 +1127,12 @@ export function StudioView() {
                         title="Play the rendered timeline composition"
                      >
                         Timeline Mix
-                        {store.playback.previewStale && store.playback.mode === "timeline" && (
-                           <span className="ml-1 text-studio-snap animate-pulse">●</span>
+                        {store.previewRendering ? (
+                           <Loader2 size={11} className="ml-1 inline animate-spin" />
+                        ) : (
+                           store.playback.previewStale && store.playback.mode === "timeline" && (
+                              <span className="ml-1 text-studio-snap animate-pulse">●</span>
+                           )
                         )}
                      </button>
 
@@ -1086,9 +1165,11 @@ export function StudioView() {
                      {store.playback.mode === "timeline" && store.playback.previewStale && (
                         <button
                            onClick={() => store.renderPreview()}
-                           className="px-2.5 py-1 rounded-md bg-studio-snap/20 hover:bg-studio-snap/30 text-studio-snap text-[11px] font-medium transition shrink-0"
+                           disabled={store.previewRendering}
+                           className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-studio-snap/20 hover:bg-studio-snap/30 text-studio-snap text-[11px] font-medium transition shrink-0 disabled:opacity-60"
                         >
-                           Update Preview
+                           {store.previewRendering && <Loader2 size={11} className="animate-spin" />}
+                           {store.previewRendering ? "Rendering…" : "Update Preview"}
                         </button>
                      )}
                   </div>
@@ -1206,8 +1287,6 @@ export function StudioView() {
                {dragClip.name}
             </div>
          )}
-
-         <UiDialogHost />
       </div>
    );
 }

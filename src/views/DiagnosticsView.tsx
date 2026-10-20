@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/utils";
 import { useCallback, useEffect, useState } from "react";
 import {
    CheckCircle2,
@@ -7,6 +8,7 @@ import {
    FileWarning,
    FolderOpen,
    HardDrive,
+   MinusCircle,
    Network,
    RefreshCw,
    Sparkles,
@@ -22,18 +24,21 @@ import { useAppStore } from "@/stores/app";
 import { useStudioStore } from "../stores/studio";
 import { computeTimelineDuration } from "../lib/studioTypes";
 import { formatTime } from "../lib/studioTime";
-import { api, onEvent, clipboard } from "@/lib/api";
+import { api, clipboard } from "@/lib/api";
 import { toast } from "@/stores/toast";
-import type { InstallProgressEvent, YtdlpUpdateInfo } from "@/lib/types";
+import type { YtdlpUpdateInfo } from "@/lib/types";
 import { formatBytes } from "@/lib/format";
 import { useSystemUsage } from "@/lib/useSystemUsage";
 
 export function DiagnosticsView() {
-   const { deps, refreshDeps } = useAppStore();
+   const { deps, refreshDeps, appInfo } = useAppStore();
    const [loading, setLoading] = useState(false);
-   const [installing, setInstalling] = useState(false);
-   const [installProgress, setInstallProgress] =
-      useState<InstallProgressEvent | null>(null);
+   // Install state lives in the app store (progress events are wired up in
+   // App.tsx): as local state, leaving this view mid-install and coming back
+   // re-enabled the Install buttons while the first install was still running.
+   const installing = useAppStore((s) => s.installing);
+   const installProgress = useAppStore((s) => s.installProgress);
+   const { setInstalling, setInstallProgress } = useAppStore.getState();
    const [updateInfo, setUpdateInfo] = useState<YtdlpUpdateInfo | null>(null);
    const [updating, setUpdating] = useState(false);
    const usageSamples = useSystemUsage(true);
@@ -47,13 +52,10 @@ export function DiagnosticsView() {
 
    useEffect(() => {
       run();
-      const un = onEvent("install-progress", (p) => setInstallProgress(p));
-      return () => {
-         un.then((fn) => fn());
-      };
    }, []);
 
    const install = async (what: "all" | "yt-dlp" | "ffmpeg") => {
+      if (useAppStore.getState().installing) return;
       setInstalling(true);
       setInstallProgress(null);
       try {
@@ -61,7 +63,7 @@ export function DiagnosticsView() {
          toast("Installed", "Dependencies are ready.", "success");
          await refreshDeps();
       } catch (e) {
-         toast("Install failed", (e as Error).message, "destructive");
+         toast("Install failed", errorMessage(e), "destructive");
       } finally {
          setInstalling(false);
          setInstallProgress(null);
@@ -80,7 +82,7 @@ export function DiagnosticsView() {
             info.updateAvailable ? "info" : "success",
          );
       } catch (e) {
-         toast("Update check failed", (e as Error).message, "destructive");
+         toast("Update check failed", errorMessage(e), "destructive");
       }
    };
 
@@ -96,7 +98,7 @@ export function DiagnosticsView() {
          await refreshDeps();
          setUpdateInfo(null);
       } catch (e) {
-         toast("Update failed", (e as Error).message, "destructive");
+         toast("Update failed", errorMessage(e), "destructive");
       } finally {
          setUpdating(false);
       }
@@ -269,11 +271,14 @@ export function DiagnosticsView() {
                      }
                      detail={deps.network.error ?? undefined}
                   />
+                  {/* Informational only — Amen never needs Python, so its
+                      absence is neutral, not a red failure. */}
                   <SimpleCheck
                      icon={Cpu}
                      label="Python"
                      ok={!!deps.python}
-                     value={deps.python ? "launcher found" : "not required"}
+                     neutral={!deps.python}
+                     value={deps.python ? "launcher found" : "Not installed (not required)"}
                      detail={deps.python ?? undefined}
                   />
                </div>
@@ -337,8 +342,17 @@ export function DiagnosticsView() {
                                  Logs & diagnostics
                               </div>
                               <div className="text-[12px] text-muted-foreground">
-                                 Structured logs are stored locally at{" "}
-                                 {deps.toolsDir.replace(/\\tools$/, "\\logs")}.
+                                 {appInfo?.logsDir ? (
+                                    <>
+                                       Structured logs are stored locally at{" "}
+                                       <span className="break-all font-mono text-foreground/70">
+                                          {appInfo.logsDir}
+                                       </span>
+                                       .
+                                    </>
+                                 ) : (
+                                    "Structured logs are stored locally on this PC."
+                                 )}
                               </div>
                            </div>
                         </div>
@@ -347,8 +361,12 @@ export function DiagnosticsView() {
                               variant="outline"
                               size="sm"
                               onClick={async () => {
-                                 const logs = await api.getLogsDir();
-                                 await api.openFolder(logs);
+                                 try {
+                                    const logs = appInfo?.logsDir ?? (await api.getLogsDir());
+                                    await api.openFolder(logs);
+                                 } catch (e) {
+                                    toast("Couldn't open the logs folder", errorMessage(e), "destructive");
+                                 }
                               }}
                            >
                               <FolderOpen className="h-3.5 w-3.5" />
@@ -358,13 +376,23 @@ export function DiagnosticsView() {
                               variant="outline"
                               size="sm"
                               onClick={async () => {
-                                 const text = await api.getDiagnosticText();
-                                 await clipboard.writeText(text);
-                                 toast(
-                                    "Copied",
-                                    "Full diagnostic report copied to clipboard.",
-                                    "success",
-                                 );
+                                 let text: string;
+                                 try {
+                                    text = await api.getDiagnosticText();
+                                 } catch (e) {
+                                    toast("Couldn't build the report", errorMessage(e), "destructive");
+                                    return;
+                                 }
+                                 try {
+                                    await clipboard.writeText(text);
+                                    toast(
+                                       "Copied",
+                                       "Full diagnostic report copied to clipboard.",
+                                       "success",
+                                    );
+                                 } catch (e) {
+                                    toast("Couldn't copy", errorMessage(e), "destructive");
+                                 }
                               }}
                            >
                               <ClipboardCopy className="h-3.5 w-3.5" />
@@ -502,19 +530,24 @@ function SimpleCheck({
    icon: Icon,
    label,
    ok,
+   neutral = false,
    value,
    detail,
 }: {
    icon: typeof HardDrive;
    label: string;
    ok: boolean;
+   /** Informational row: neither a pass nor a failure. */
+   neutral?: boolean;
    value: string;
    detail?: string;
 }) {
    return (
       <div className="rounded-2xl border border-border bg-card p-4">
          <div className="flex items-center gap-2 text-sm font-semibold">
-            {ok ? (
+            {neutral ? (
+               <MinusCircle className="h-4 w-4 text-muted-foreground" />
+            ) : ok ? (
                <CheckCircle2 className="h-4 w-4 text-success" />
             ) : (
                <XCircle className="h-4 w-4 text-destructive" />
@@ -524,7 +557,13 @@ function SimpleCheck({
          </div>
          <div className="mt-2 text-[12px] text-muted-foreground">
             <div className="font-medium text-foreground/80">{value}</div>
-            {detail && <div className="mt-0.5 text-destructive">{detail}</div>}
+            {/* The detail is an error only when the check failed — for a
+                passing row (e.g. the Python launcher's path) it's just info. */}
+            {detail && (
+               <div className={ok || neutral ? "mt-0.5 break-all" : "mt-0.5 text-destructive"}>
+                  {detail}
+               </div>
+            )}
          </div>
       </div>
    );

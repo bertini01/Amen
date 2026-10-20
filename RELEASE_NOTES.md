@@ -1,59 +1,61 @@
-# Amen 0.2.0 — Release Notes
+# Amen Studio 0.4.0 — Release Notes
+
+## New
+
+- **Spotify links.** Spotify music is copy-protected, so it can't be saved
+  directly. Pasting a Spotify song, album or playlist link now shows what it
+  describes (cover, title, artists, length) and searches for versions you can
+  save. Results are ranked by matching length and title, with covers, live and
+  karaoke versions ranked down; you choose. The saved file is named and tagged
+  after the song ("Artist - Title.mp3", with title and artist tags).
+  Other copy-protected services (Apple Music, Tidal, Deezer, Amazon Music) get
+  a clear explanation instead of a cryptic error.
+- **Search by song name.** Typing a song and artist now searches (the button
+  reads "Search"). Before, the button only accepted links, so search was
+  unreachable. Only the top result is pre-selected.
+- **Tidy up download folders.** History offers to move songs that older
+  versions saved into accidental sub-folders back into the download folder,
+  under their full title.
+- **Completion notifications** (Settings → General), and "Start empty" now
+  works.
+- **Drag audio files onto the Audio Studio.**
 
 ## Fixed
 
-- **YouTube downloads returning HTTP 403.** Root-caused to a stale bundled
-  yt-dlp (2026.07.04): its fallback extraction client was being blocked by
-  YouTube. Verified against the reported URL that updating to the current
-  stable release (2026.08.19) resolves it end-to-end — metadata fetch,
-  download, FFmpeg conversion, and a valid, playable MP3 output. The
-  "HTTP 403" error message now points the user at Diagnostics → check for
-  updates instead of only suggesting cookies/region-blocking.
-- **Timeline zoom stuck at a tiny scale for long tracks.** The timeline's
-  auto-fit-to-content ran once, ever, against whichever duration happened to
-  be current at first mount — almost always an empty project — so placing a
-  multi-minute clip later left the ruler at an unusably small scale. It now
-  re-fits the first time content is placed on an untouched timeline, while
-  still respecting a zoom level the user picked manually (mirroring the
-  waveform view's existing behavior).
+- **Files saved into nested folders.** A "/" in a title created folders
+  ("EP 18 / Song" became "EP 18\Song.mp3"). Titles can no longer create
+  folders or leave the download folder. Names over ~120 characters are
+  shortened at a word with "…", and the full path stays within Windows limits.
+  A "%" in a title no longer garbles the name.
+- **Open in Audio Studio, Open file and Show in folder failing** for titles
+  with emoji: history recorded a path without the emoji. Output is now read as
+  UTF-8, the recorded path is checked against the disk, and existing entries
+  repair themselves.
+- **Download progress never moved and "Processing" never showed.** yt-dlp
+  wrote progress to a stream the app did not read.
+- **"Download again" was silently skipped**, as was saving a video as MP4
+  after its MP3. Duplicates now require the same format and an existing file.
+- Cancel during "Fetching info" was ignored; removing a job while it was
+  fetching brought it back.
+- Copy and Paste failed (missing clipboard permission) while still saying
+  "Copied".
+- Studio playback failed for audio outside the user profile.
+- Settings edits leaked into the app before Save; Theme changes saved them.
+- Your default format/quality was ignored on startup; downloads re-analyzed
+  links already analyzed.
+- Diagnostics: the network check always reported failure; the logs path was
+  wrong; leaving during an install allowed a second, corrupting install;
+  a failed yt-dlp update reported success.
+- Confirmation dialogs only worked inside the Studio (Clear history ran
+  without asking).
+- Errors across the app showed "[object Object]" or nothing; they now give
+  the reason.
 
-## Hardening / verification this pass
+## Store "What's new" text
 
-- Full dependency audit: `npm audit` (0 vulnerabilities), `cargo audit`
-  (0 actual advisories — 17 "unmaintained/unsound" warnings, all in
-  Windows-irrelevant transitive GTK3 bindings pulled in by the
-  clipboard/dialog plugins). Cargo.lock refreshed to the latest versions
-  allowed by existing version constraints; verified with a full release
-  build and the complete Rust test suite.
-- Added a throttled (once/24h), silent background check for yt-dlp updates
-  on app startup, surfaced as a toast — never auto-installs, so it can't
-  affect reproducibility, but it closes the gap where an installed copy
-  could silently go stale for months with no prompt to update.
-- Reviewed the download/render pipeline's subprocess and path handling:
-  confirmed every yt-dlp/FFmpeg invocation uses structured argument arrays
-  (never a shell string), filenames are sanitized against invalid/reserved
-  Windows names, and output paths reject traversal — no changes needed.
-- Reviewed the cookies workflow (Settings → Advanced): already an explicit,
-  user-provided `cookies.txt` path, never auto-harvested from a browser —
-  correct as-is; browser-cookie auto-extraction was deliberately not added.
-- Reviewed the disabled Content-Security-Policy (`csp: null` in
-  tauri.conf.json). Left unchanged this pass: the app loads no remote
-  content, so the exploitable surface is low, and a CSP tightened without
-  being able to manually click through every visual/audio code path risks
-  silently breaking asset-protocol images or audio playback in a way the
-  E2E suite might not catch pixel-for-pixel — exactly the kind of
-  "unnecessary instability" a hardening pass should avoid introducing.
-  Worth a dedicated, carefully-tested pass on its own.
-- Full E2E and Rust regression suites re-run after every change (see below).
+(Deliberately names no other company's service: Store reviewers can treat
+brand names in listings as a trademark issue.)
 
-## Not changed (reviewed, deliberately deferred)
-
-- React 18→19, Vite 6→8, TypeScript 5→7, Zustand 4→5, and a few other
-  major-version bumps are available upstream. All are 0-vulnerability,
-  pure major-version jumps with real breaking-change surface; deferred to
-  a dedicated migration pass rather than bundled into a hardening release.
-
-## Versioning
-
-Bumped 0.1.0 → 0.2.0 (package.json, Cargo.toml, tauri.conf.json) to mark
-this as the first verified, evidence-backed hardening release.
+Paste a streaming-service link and pick a version you can save. Search songs by name.
+Downloads are named and tagged properly, never in stray folders, with live
+progress. Many fixes across History, Studio, Settings and Diagnostics.

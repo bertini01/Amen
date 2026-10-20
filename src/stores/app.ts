@@ -1,5 +1,7 @@
 import { create } from "zustand";
 import { api } from "@/lib/api";
+import { isSpotifyLink } from "@/lib/url";
+import { rankMatches, type RankedMatch } from "@/lib/musicMatch";
 import type {
    AnalyzeResult,
    AppError,
@@ -7,6 +9,7 @@ import type {
    DependencyReport,
    InstallProgressEvent,
    MediaInfo,
+   MusicLink,
    PlaylistInfo,
    View,
 } from "@/lib/types";
@@ -22,6 +25,13 @@ interface AppState {
    playlist: PlaylistInfo | null;
    pendingUrl: string | null;
 
+   /** A Spotify link: the songs it describes, and matches for the chosen one. */
+   musicLink: MusicLink | null;
+   musicTrackIndex: number | null;
+   musicMatches: RankedMatch[] | null;
+   musicSearching: boolean;
+   musicError: AppError | null;
+
    installing: boolean;
    installProgress: InstallProgressEvent | null;
 
@@ -31,11 +41,20 @@ interface AppState {
    checkForYtdlpUpdateOncePerDay: () => Promise<void>;
    analyze: (url: string) => Promise<void>;
    clearAnalysis: () => void;
+   findMusicTrack: (index: number) => Promise<void>;
    setInstalling: (v: boolean) => void;
    setInstallProgress: (p: InstallProgressEvent | null) => void;
 }
 
-export const useAppStore = create<AppState>((set) => ({
+const NO_MUSIC = {
+   musicLink: null,
+   musicTrackIndex: null,
+   musicMatches: null,
+   musicSearching: false,
+   musicError: null,
+};
+
+export const useAppStore = create<AppState>((set, get) => ({
    view: "home",
    appInfo: null,
    deps: null,
@@ -44,6 +63,11 @@ export const useAppStore = create<AppState>((set) => ({
    media: null,
    playlist: null,
    pendingUrl: null,
+   musicLink: null,
+   musicTrackIndex: null,
+   musicMatches: null,
+   musicSearching: false,
+   musicError: null,
    installing: false,
    installProgress: null,
 
@@ -95,7 +119,19 @@ export const useAppStore = create<AppState>((set) => ({
    },
 
    analyze: async (url) => {
-      set({ analyzing: true, analysisError: null });
+      set({ analyzing: true, analysisError: null, ...NO_MUSIC });
+      if (isSpotifyLink(url)) {
+         // Spotify audio is copy-protected; describe the songs instead and let
+         // the user pick a version they can save (see music_link.rs).
+         try {
+            const musicLink = await api.resolveMusicLink(url);
+            set({ analyzing: false, musicLink, media: null, playlist: null, pendingUrl: url });
+            if (musicLink.kind === "track") await get().findMusicTrack(0);
+         } catch (e) {
+            set({ analyzing: false, analysisError: e as AppError, media: null, playlist: null, pendingUrl: url });
+         }
+         return;
+      }
       try {
          const result: AnalyzeResult = await api.analyzeUrl(url);
          if (result === "Unsupported") {
@@ -148,7 +184,29 @@ export const useAppStore = create<AppState>((set) => ({
          playlist: null,
          analysisError: null,
          pendingUrl: null,
+         ...NO_MUSIC,
       }),
+
+   findMusicTrack: async (index) => {
+      const track = get().musicLink?.tracks[index];
+      if (!track) return;
+      set({ musicTrackIndex: index, musicMatches: null, musicSearching: true, musicError: null });
+      try {
+         const result = await api.analyzeUrl(track.query);
+         // Ignore a reply for a song the user has since moved away from.
+         if (get().musicTrackIndex !== index) return;
+         const entries =
+            result !== "Unsupported" && "Playlist" in result
+               ? result.Playlist.entries
+               : result !== "Unsupported" && "Media" in result
+                 ? [result.Media]
+                 : [];
+         set({ musicMatches: rankMatches(track, entries), musicSearching: false });
+      } catch (e) {
+         if (get().musicTrackIndex !== index) return;
+         set({ musicSearching: false, musicError: e as AppError });
+      }
+   },
 
    setInstalling: (installing) => set({ installing }),
    setInstallProgress: (installProgress) => set({ installProgress }),

@@ -2,6 +2,20 @@ import { useEffect, useRef, useState } from "react";
 import { Play, Pause, SkipBack, Volume2, VolumeX, Zap } from "lucide-react";
 import { formatTime, clamp } from "../lib/studioTime";
 import { assetUrl } from "../lib/api";
+import { errorMessage } from "../lib/utils";
+import { toast } from "../stores/toast";
+
+/** Plain-language reason for an `HTMLMediaElement.play()` rejection. */
+export function describePlaybackError(e: unknown): string {
+   const name = e && typeof e === "object" && "name" in e ? String((e as { name: unknown }).name) : "";
+   if (name === "NotSupportedError") {
+      return "The file couldn't be loaded. It may have been moved or deleted, or its format isn't supported for playback.";
+   }
+   if (name === "NotAllowedError") {
+      return "Playback was blocked by the system. Press Play again.";
+   }
+   return errorMessage(e);
+}
 
 interface PlayerBarProps {
    playing: boolean;
@@ -73,6 +87,8 @@ export function PlayerBar({
    pendingSeekRef.current = playhead;
    /** True from the moment a new src is set until its metadata has loaded. */
    const [srcReady, setSrcReady] = useState(false);
+   /** De-duplicates the error toast: the play effect can retry the same failing src more than once. */
+   const lastPlayErrorRef = useRef<{ message: string; at: number } | null>(null);
 
    const audioSrc = mode === "source" && sourcePlaybackPath
       ? assetUrl(sourcePlaybackPath)
@@ -109,8 +125,19 @@ export function PlayerBar({
       const audio = audioRef.current;
       if (!audio) return;
       if (playing) {
-         audio.play().catch(() => {
-            /* autoplay/decoding rejections are surfaced by the transport state, not a console dump */
+         audio.play().catch((e: unknown) => {
+            // A newer load/pause interrupting this play() is routine while
+            // switching sources — not a failure worth reporting.
+            if (e instanceof DOMException && e.name === "AbortError") return;
+            // Anything else used to vanish silently, leaving the transport
+            // showing "playing" over silence. Reset it and say why.
+            onPause?.();
+            const message = describePlaybackError(e);
+            const now = Date.now();
+            const last = lastPlayErrorRef.current;
+            if (last && last.message === message && now - last.at < 2000) return;
+            lastPlayErrorRef.current = { message, at: now };
+            toast("Couldn't play this audio", message, "destructive");
          });
       } else {
          audio.pause();

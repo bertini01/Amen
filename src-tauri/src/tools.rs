@@ -1,6 +1,6 @@
 use crate::config::{self, AppSettings};
 use crate::error::{AppError, AppResult};
-use crate::process::{new_command, run_capture};
+use crate::process::{new_command, run_capture, run_capture_full};
 use serde::Serialize;
 use std::io::{Read, Write};
 use std::net::ToSocketAddrs;
@@ -681,13 +681,49 @@ pub fn update_ytdlp(settings: &AppSettings) -> AppResult<String> {
             "To update a system-wide yt-dlp, use pip or your package manager.",
         ));
     }
+    let before = probe_ytdlp_version(&exe);
     let mut cmd = new_command(&exe);
     cmd.arg("-U");
-    let out = run_capture(&mut cmd, 120_000).ok_or_else(|| {
+    let out = run_capture_full(&mut cmd, 120_000).ok_or_else(|| {
         AppError::with_detail("update_failed", "Could not run the yt-dlp updater.", "The process could not be started.")
     })?;
-    let new_version = probe_ytdlp_version(&exe).unwrap_or_else(|| "unknown".to_string());
-    Ok(format!("{out}\nUpdated to: {new_version}"))
+    let after = probe_ytdlp_version(&exe);
+    let text = format!("{}\n{}", out.stdout.trim(), out.stderr.trim()).trim().to_string();
+    if out.timed_out {
+        return Err(AppError::with_detail(
+            "update_failed",
+            "The yt-dlp updater did not finish in time.",
+            text,
+        ));
+    }
+    match interpret_update(out.success == Some(true), before.as_deref(), after.as_deref(), &text) {
+        Ok(summary) => Ok(format!("{summary}\n\n{text}")),
+        Err(message) => Err(AppError::with_detail("update_failed", message, text)),
+    }
+}
+
+/// Decide whether `yt-dlp -U` really worked. Its exit status alone is not
+/// trusted: the updater can report an error and still exit 0, and before this
+/// check any run at all was shown as a successful update.
+fn interpret_update(
+    exited_ok: bool,
+    before: Option<&str>,
+    after: Option<&str>,
+    output: &str,
+) -> Result<String, String> {
+    let lower = output.to_lowercase();
+    if !exited_ok || lower.contains("error:") {
+        return Err("yt-dlp could not update itself.".to_string());
+    }
+    let Some(after) = after else {
+        return Err("yt-dlp no longer runs after the update. Reinstall it from Diagnostics.".to_string());
+    };
+    match before {
+        Some(before) if before != after => Ok(format!("Updated yt-dlp from {before} to {after}.")),
+        None => Ok(format!("yt-dlp is now at {after}.")),
+        Some(_) if lower.contains("up to date") => Ok(format!("yt-dlp is already up to date ({after}).")),
+        Some(_) => Err("The updater finished but yt-dlp's version did not change.".to_string()),
+    }
 }
 
 #[cfg(test)]
@@ -700,5 +736,26 @@ mod tests {
         assert!(version_newer("2026.01.01", "2025.12.31"));
         assert!(!version_newer("2025.01.26", "2025.01.26"));
         assert!(!version_newer("2025.01.01", "2025.02.01"));
+    }
+
+    #[test]
+    fn update_success_needs_exit_zero_and_a_new_version() {
+        let updated = "Updating to stable@2026.09.01 from yt-dlp/yt-dlp ...\nUpdated yt-dlp to stable@2026.09.01";
+        assert!(interpret_update(true, Some("2026.08.19"), Some("2026.09.01"), updated)
+            .unwrap()
+            .contains("from 2026.08.19 to 2026.09.01"));
+
+        let current = "Latest version: stable@2026.08.19\nyt-dlp is up to date (stable@2026.08.19)";
+        assert!(interpret_update(true, Some("2026.08.19"), Some("2026.08.19"), current)
+            .unwrap()
+            .contains("already up to date"));
+
+        // Non-zero exit, an ERROR line, an unchanged version or a broken
+        // binary afterwards are all failures.
+        assert!(interpret_update(false, Some("1"), Some("2"), "").is_err());
+        let denied = "ERROR: Unable to write to C:\\tools\\yt-dlp.exe; Try running as administrator";
+        assert!(interpret_update(true, Some("1"), Some("1"), denied).is_err());
+        assert!(interpret_update(true, Some("1"), Some("1"), "Updating to stable@2").is_err());
+        assert!(interpret_update(true, Some("1"), None, "Updated yt-dlp").is_err());
     }
 }

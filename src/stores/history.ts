@@ -1,10 +1,13 @@
 import { create } from "zustand";
 import { api } from "@/lib/api";
 import type { HistoryItem } from "@/lib/types";
+import { errorMessage } from "@/lib/utils";
 
 interface HistoryState {
    items: HistoryItem[];
    loaded: boolean;
+   /** Why the last refresh failed, if it did. */
+   error: string | null;
    query: string;
    formatFilter: string;
    statusFilter: string;
@@ -21,6 +24,7 @@ interface HistoryState {
 export const useHistoryStore = create<HistoryState>((set, get) => ({
    items: [],
    loaded: false,
+   error: null,
    query: "",
    formatFilter: "all",
    statusFilter: "all",
@@ -40,27 +44,23 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
             statusFilter: statusFilter === "all" ? undefined : statusFilter,
             sort,
          });
-         set({ items, loaded: true });
-      } catch {
-         /* non-fatal */
+         set({ items, loaded: true, error: null });
+      } catch (e) {
+         // Shown inline with a Retry; swallowing it left "Loading…" forever.
+         set({ loaded: true, error: errorMessage(e) });
       }
    },
 
+   // Rows are only dropped locally once the backend has actually removed
+   // them; otherwise they silently reappear on the next refresh. Errors
+   // propagate so the caller can say why.
    removeItem: async (id) => {
-      try {
-         await api.removeHistoryItem(id);
-      } catch {
-         /* ignore */
-      }
+      await api.removeHistoryItem(id);
       set({ items: get().items.filter((i) => i.id !== id) });
    },
 
    clearAll: async () => {
-      try {
-         await api.clearHistory();
-      } catch {
-         /* ignore */
-      }
+      await api.clearHistory();
       set({ items: [] });
    },
 }));

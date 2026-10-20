@@ -1,9 +1,11 @@
+import { errorMessage } from "@/lib/utils";
 import { useEffect, useMemo, useState } from "react";
 import {
    Copy,
    Download,
    Eye,
    FolderOpen,
+   FolderTree,
    History,
    Music2,
    RefreshCw,
@@ -31,10 +33,13 @@ import {
    DialogTitle,
 } from "@/components/ui/dialog";
 import { useHistoryStore } from "@/stores/history";
-import { useStudioStore } from "@/stores/studio";
+import { useQueueStore } from "@/stores/queue";
+import { openInStudio } from "@/stores/studio";
 import { useAppStore } from "@/stores/app";
 import { api, clipboard } from "@/lib/api";
+import type { DownloadRequest } from "@/lib/types";
 import { toast } from "@/stores/toast";
+import { appConfirm } from "@/stores/uiDialog";
 import {
    formatBytes,
    formatDuration,
@@ -48,10 +53,51 @@ export function HistoryView() {
    const formatFilter = useHistoryStore((s) => s.formatFilter);
    const statusFilter = useHistoryStore((s) => s.statusFilter);
    const sort = useHistoryStore((s) => s.sort);
+   const loadError = useHistoryStore((s) => s.error);
 
    useEffect(() => {
       refresh();
    }, [query, formatFilter, statusFilter, sort]);
+
+   // Downloads that older versions saved into accidental sub-folders.
+   const [misplaced, setMisplaced] = useState(0);
+   const [tidying, setTidying] = useState(false);
+   useEffect(() => {
+      api.tidyDownloadFolders(true)
+         .then((r) => setMisplaced(r.found))
+         .catch(() => setMisplaced(0));
+   }, [items.length]);
+
+   const tidyUp = async () => {
+      const ok = await appConfirm(
+         `${misplaced} ${misplaced === 1 ? "song was" : "songs were"} saved inside extra folders because ${misplaced === 1 ? "its title" : "their titles"} contained a slash. Amen will move ${misplaced === 1 ? "it" : "them"} back into your download folder under the full title and remove the folders left empty. Nothing else in those folders is touched.`,
+         { title: "Tidy up download folders?", confirmLabel: "Tidy up" },
+      );
+      if (!ok) return;
+      setTidying(true);
+      try {
+         const r = await api.tidyDownloadFolders(false);
+         await refresh();
+         setMisplaced(r.found - r.moved);
+         if (r.failed.length) {
+            toast(
+               `Moved ${r.moved}, ${r.failed.length} couldn't be moved`,
+               r.failed.slice(0, 3).join("; "),
+               "destructive",
+            );
+         } else {
+            toast(
+               "Download folder tidied",
+               `Moved ${r.moved} ${r.moved === 1 ? "song" : "songs"} and removed ${r.removedFolders} empty ${r.removedFolders === 1 ? "folder" : "folders"}.`,
+               "success",
+            );
+         }
+      } catch (e) {
+         toast("Couldn't tidy up", errorMessage(e), "destructive");
+      } finally {
+         setTidying(false);
+      }
+   };
 
    const stats = useMemo(() => {
       const total = items.length;
@@ -79,13 +125,22 @@ export function HistoryView() {
                <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => {
-                     useHistoryStore.getState().clearAll();
-                     toast(
-                        "Cleared",
-                        "Download history cleared. Files were not deleted.",
-                        "success",
+                  onClick={async () => {
+                     const ok = await appConfirm(
+                        "Every entry will be removed from your download history. The downloaded files on disk are not deleted.",
+                        { title: "Clear history?", confirmLabel: "Clear history", destructive: true },
                      );
+                     if (!ok) return;
+                     try {
+                        await useHistoryStore.getState().clearAll();
+                        toast(
+                           "Cleared",
+                           "Download history cleared. Files were not deleted.",
+                           "success",
+                        );
+                     } catch (e) {
+                        toast("Couldn't clear history", errorMessage(e), "destructive");
+                     }
                   }}
                >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -93,6 +148,18 @@ export function HistoryView() {
                </Button>
             )}
          </div>
+
+         {misplaced > 0 && (
+            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm">
+               <FolderTree className="h-4 w-4 shrink-0 text-warning" />
+               <span className="min-w-0 flex-1">
+                  {misplaced} {misplaced === 1 ? "song is" : "songs are"} stored in extra folders created by an older version.
+               </span>
+               <Button size="sm" variant="outline" onClick={tidyUp} disabled={tidying}>
+                  {tidying ? "Tidying…" : "Tidy up"}
+               </Button>
+            </div>
+         )}
 
          {/* Filters */}
          <div className="flex flex-wrap items-center gap-2">
@@ -161,12 +228,26 @@ export function HistoryView() {
             </Button>
          </div>
 
+         {loadError && (
+            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-destructive/25 bg-destructive/8 px-4 py-3 text-sm">
+               <span className="flex-1 text-destructive">
+                  Couldn't load your history: {loadError}
+               </span>
+               <Button variant="outline" size="sm" onClick={refresh}>
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Retry
+               </Button>
+            </div>
+         )}
+
          {items.length === 0 ? (
-            <EmptyState
-               icon={History}
-               title="No history yet"
-               description="Completed downloads will appear here so you can find them again quickly."
-            />
+            loadError ? null : (
+               <EmptyState
+                  icon={History}
+                  title="No history yet"
+                  description="Completed downloads will appear here so you can find them again quickly."
+               />
+            )
          ) : (
             <div className="space-y-2">
                {items.map((item) => (
@@ -184,39 +265,74 @@ export function HistoryView() {
 function HistoryRow({ id }: { id: string }) {
    const item = useHistoryStore((s) => s.items.find((i) => i.id === id));
    const [confirmDelete, setConfirmDelete] = useState(false);
+   const [removing, setRemoving] = useState(false);
    const setView = useAppStore((s) => s.setView);
-   const studioStore = useStudioStore();
 
    if (!item) return null;
 
-   const handleOpenInStudio = async () => {
-      if (item.status !== "completed" || !item.filePath) {
-         toast("Cannot open", "File not available", "destructive");
-         return;
-      }
+   // A skipped entry still points at a real file (it was skipped BECAUSE the
+   // file already exists), so it gets the same file actions as a completed one.
+   const hasFile =
+      (item.status === "completed" || item.status === "skipped") && !!item.filePath;
 
-      // Only MP3 is audio format from downloads (MP4 is video)
-      if (item.format !== "mp3") {
-         toast("Not supported", "Only audio files (MP3) can be opened in Audio Studio", "destructive");
-         return;
-      }
-
+   const openFile = async () => {
       try {
-         // Initialize project if needed
-         if (!studioStore.project) {
-            await studioStore.newProject("Untitled Mix");
-         }
-
-         // Add the audio file as a source
-         await studioStore.addSource(item.filePath);
-         
-         // Navigate to studio
-         setView("studio");
-         
-         toast("Opened in Studio", item.title ?? "Audio file added", "success");
+         await api.openFile(item.filePath);
       } catch (e) {
-         console.error("Failed to open in studio:", e);
-         toast("Failed to open", (e as Error).message, "destructive");
+         toast("Couldn't open the file", errorMessage(e), "destructive");
+      }
+   };
+
+   const reveal = async () => {
+      try {
+         await api.revealInFolder(item.filePath);
+      } catch (e) {
+         toast("Couldn't show the file in its folder", errorMessage(e), "destructive");
+      }
+   };
+
+   const copyUrl = async () => {
+      try {
+         await clipboard.writeText(item.url);
+         toast("Copied", "Source URL copied to clipboard.", "success");
+      } catch (e) {
+         toast("Couldn't copy", errorMessage(e), "destructive");
+      }
+   };
+
+   const downloadAgain = async () => {
+      try {
+         const request: DownloadRequest = {
+            url: item.url,
+            format: item.format,
+            quality: item.quality,
+            title: item.title,
+            thumbnail: item.thumbnail,
+            mediaId: item.mediaId ?? null,
+            extractor: item.extractor,
+            duration: item.duration,
+            // An explicit "download again" must not be swallowed by the
+            // duplicate check that put this entry in history to begin with.
+            force: true,
+         };
+         const job = await api.startDownload(request);
+         useQueueStore.getState().upsert(job);
+         setView("downloads");
+         toast("Downloading again", item.title ?? undefined, "success");
+      } catch (e) {
+         toast("Couldn't download again", errorMessage(e), "destructive");
+      }
+   };
+
+   const remove = async () => {
+      setRemoving(true);
+      try {
+         await useHistoryStore.getState().removeItem(id);
+         setConfirmDelete(false);
+      } catch (e) {
+         toast("Couldn't remove from history", errorMessage(e), "destructive");
+      } finally {
+         setRemoving(false);
       }
    };
 
@@ -248,7 +364,10 @@ function HistoryRow({ id }: { id: string }) {
                {item.duration != null && (
                   <span>{formatDuration(item.duration)}</span>
                )}
-               {item.status === "completed" && (
+               {item.status === "skipped" && (
+                  <span className="text-warning">Skipped — already downloaded</span>
+               )}
+               {hasFile && (
                   <span
                      className="truncate text-muted-foreground/70"
                      title={item.filePath}
@@ -259,74 +378,31 @@ function HistoryRow({ id }: { id: string }) {
             </div>
          </div>
          <div className="flex shrink-0 items-center gap-1">
-            {item.status === "completed" && (
+            {hasFile && (
                <>
-                  <RowButton
-                     label="Open file"
-                     onClick={() =>
-                        api
-                           .openFile(item.filePath)
-                           .catch(() =>
-                              toast(
-                                 "Could not open file",
-                                 undefined,
-                                 "destructive",
-                              ),
-                           )
-                     }
-                  >
+                  <RowButton label="Open file" onClick={openFile}>
                      <Eye className="h-4 w-4" />
                   </RowButton>
-                  <RowButton
-                     label="Show in folder"
-                     onClick={() =>
-                        api.revealInFolder(item.filePath).catch(() => undefined)
-                     }
-                  >
+                  <RowButton label="Show in folder" onClick={reveal}>
                      <FolderOpen className="h-4 w-4" />
                   </RowButton>
+                  {/* Only MP3 downloads are audio; MP4 is video. */}
                   {item.format === "mp3" && (
                      <RowButton
                         label="Open in Audio Studio"
-                        onClick={handleOpenInStudio}
+                        onClick={() => openInStudio(item.filePath, item.title)}
                      >
                         <Music2 className="h-4 w-4" />
                      </RowButton>
                   )}
                </>
             )}
-            <RowButton
-               label="Copy source URL"
-               onClick={async () => {
-                  await clipboard.writeText(item.url);
-                  toast("Copied", "Source URL copied to clipboard.", "success");
-               }}
-            >
+            <RowButton label="Copy source URL" onClick={copyUrl}>
                <Copy className="h-4 w-4" />
             </RowButton>
             <RowButton
                label="Download again"
-               onClick={async () => {
-                  try {
-                     await api.startDownload({
-                        url: item.url,
-                        format: item.format,
-                        quality: item.quality,
-                        title: item.title,
-                        thumbnail: item.thumbnail,
-                        mediaId: item.mediaId ?? null,
-                        extractor: item.extractor,
-                        duration: item.duration,
-                     });
-                     toast("Re-queued", item.title ?? undefined, "success");
-                  } catch (e) {
-                     toast(
-                        "Could not re-download",
-                        (e as Error).message,
-                        "destructive",
-                     );
-                  }
-               }}
+               onClick={downloadAgain}
             >
                <Download className="h-4 w-4" />
             </RowButton>
@@ -359,10 +435,8 @@ function HistoryRow({ id }: { id: string }) {
                   </Button>
                   <Button
                      variant="destructive"
-                     onClick={async () => {
-                        await useHistoryStore.getState().removeItem(id);
-                        setConfirmDelete(false);
-                     }}
+                     disabled={removing}
+                     onClick={remove}
                   >
                      Remove
                   </Button>

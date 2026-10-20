@@ -1,6 +1,6 @@
 [package]
 name = "amen"
-version = "0.3.0"
+version = "0.4.0"
 description = "Amen — local media downloader powered by yt-dlp + FFmpeg"
 authors = ["Amen"]
 edition = "2021"
@@ -19,6 +19,7 @@ tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-clipboard-manager = "2"
+tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
@@ -30,10 +31,13 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 ureq = { version = "2", features = ["tls", "json"] }
 sysinfo = "0.32"
 
-# Win32 disk-space query — Windows only, so it must not be a dependency of the
-# Linux build, where the crate does not apply.
+# Win32 disk-space and package-identity queries — Windows only, so they must not
+# be dependencies of the Linux build, where they do not apply.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_Storage_Packaging_Appx"] }
+# Toasts for the packaged (MSIX) build, which needs its own AppUserModelID;
+# already a dependency of tauri-plugin-notification.
+tauri-winrt-notification = "0.8"
 
 [profile.release]
 panic = "abort"

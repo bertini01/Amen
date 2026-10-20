@@ -229,16 +229,21 @@ impl HistoryDb {
         Ok(out)
     }
 
-    pub fn find_completed_by_media_id(&self, media_id: &str) -> Option<HistoryItem> {
+    /// A completed download of the same media in the same format whose file is
+    /// still on disk. Matching on media id alone made an MP4 request look like
+    /// a duplicate of an earlier MP3, and a deleted or moved file still counted,
+    /// so "Download again" was silently skipped.
+    pub fn find_completed_duplicate(&self, media_id: &str, format: &str) -> Option<HistoryItem> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
                 "SELECT id, title, url, media_id, extractor, thumbnail, format, quality, file_path, file_size, duration, status, created_at
-                 FROM history WHERE media_id = ?1 AND status = 'completed' LIMIT 1",
+                 FROM history WHERE media_id = ?1 AND format = ?2 AND status = 'completed'
+                 ORDER BY created_at DESC",
             )
             .ok()?;
-        let mut rows = stmt
-            .query_map(params![media_id], |row| {
+        let rows = stmt
+            .query_map(params![media_id, format], |row| {
                 Ok(HistoryItem {
                     id: row.get(0)?,
                     title: row.get(1)?,
@@ -256,13 +261,38 @@ impl HistoryDb {
                 })
             })
             .ok()?;
-        rows.next().and_then(|r| r.ok())
+        let found = rows
+            .filter_map(Result::ok)
+            .find(|item| !item.file_path.is_empty() && std::path::Path::new(&item.file_path).is_file());
+        found
+    }
+
+    /// The media id of the latest completed download recorded at `file_path`.
+    /// Two different long titles can be sliced to the same filename; this
+    /// tells "the same song again" from "another song with that name".
+    pub fn media_id_for_file(&self, file_path: &str) -> Option<String> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT media_id FROM history WHERE file_path = ?1 AND status = 'completed'
+             ORDER BY created_at DESC LIMIT 1",
+            params![file_path],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .ok()
+        .flatten()
     }
 
     pub fn remove_history(&self, id: &str) -> AppResult<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM history WHERE id = ?1", params![id])
             .map_err(|e| AppError::with_detail("db_error", "Could not remove history item.", e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn update_file_path(&self, id: &str, file_path: &str) -> AppResult<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("UPDATE history SET file_path = ?1 WHERE id = ?2", params![file_path, id])
+            .map_err(|e| AppError::with_detail("db_error", "Could not update history item.", e.to_string()))?;
         Ok(())
     }
 
@@ -329,6 +359,15 @@ impl HistoryDb {
             .map_err(|e| AppError::with_detail("db_error", "Could not delete job.", e.to_string()))?;
         Ok(())
     }
+
+    /// Forget the persisted queue (startup behaviour "start with an empty
+    /// queue"). Download history is a separate table and is kept.
+    pub fn clear_jobs(&self) -> AppResult<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM jobs", [])
+            .map_err(|e| AppError::with_detail("db_error", "Could not clear the queue.", e.to_string()))?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -373,13 +412,73 @@ mod tests {
         let list = db.list_history(Some("Test"), None, None, "date").unwrap();
         assert_eq!(list.len(), 1);
 
-        // duplicate detection by media id
-        let found = db.find_completed_by_media_id("vid123");
-        assert!(found.is_some());
-        assert_eq!(db.find_completed_by_media_id("nope"), None);
-
         db.remove_history("h1").unwrap();
         assert_eq!(db.list_history(None, None, None, "date").unwrap().len(), 0);
+    }
+
+    #[test]
+    fn duplicate_needs_same_format_and_an_existing_file() {
+        let dir = std::env::temp_dir().join(format!("amen-dup-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("Test Song.mp3");
+        std::fs::write(&file, b"x").unwrap();
+
+        let db = HistoryDb::open_isolated();
+        let mut item = sample();
+        item.file_path = file.to_string_lossy().to_string();
+        db.insert_history(&item).unwrap();
+
+        let found = db.find_completed_duplicate("vid123", "mp3");
+        assert_eq!(found.map(|i| i.id), Some("h1".to_string()));
+        // Another format of the same media is not a duplicate.
+        assert_eq!(db.find_completed_duplicate("vid123", "mp4"), None);
+        assert_eq!(db.find_completed_duplicate("nope", "mp3"), None);
+
+        // Once the file is gone the record no longer blocks a new download.
+        std::fs::remove_file(&file).unwrap();
+        assert_eq!(db.find_completed_duplicate("vid123", "mp3"), None);
+
+        // A skipped entry is never a duplicate source, even with a file.
+        std::fs::write(&file, b"x").unwrap();
+        let mut skipped = item.clone();
+        skipped.id = "h2".to_string();
+        skipped.status = "skipped".to_string();
+        db.remove_history("h1").unwrap();
+        db.insert_history(&skipped).unwrap();
+        assert_eq!(db.find_completed_duplicate("vid123", "mp3"), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn same_sliced_name_is_still_two_songs() {
+        let db = HistoryDb::open_isolated();
+        let first = sample(); // media vid123 at C:\Music\Test Song.mp3
+        db.insert_history(&first).unwrap();
+        assert_eq!(db.media_id_for_file(&first.file_path).as_deref(), Some("vid123"));
+        assert_eq!(db.media_id_for_file("C:\\Music\\Other.mp3"), None);
+        // Duplicate detection is by media id + format, never by file name.
+        assert_eq!(db.find_completed_duplicate("vid999", "mp3"), None);
+    }
+
+    #[test]
+    fn clear_jobs_keeps_history() {
+        let db = HistoryDb::open_isolated();
+        db.insert_history(&sample()).unwrap();
+        let job = PersistedJob {
+            id: "j1".to_string(),
+            url: "https://example.com/v".to_string(),
+            format: "mp3".to_string(),
+            quality: "best".to_string(),
+            title: None,
+            thumbnail: None,
+            media_id: None,
+            created_at: 1,
+            status: "pending".to_string(),
+        };
+        db.save_job(&job).unwrap();
+        db.clear_jobs().unwrap();
+        assert_eq!(db.load_jobs().unwrap().len(), 0);
+        assert_eq!(db.list_history(None, None, None, "date").unwrap().len(), 1);
     }
 
     #[test]

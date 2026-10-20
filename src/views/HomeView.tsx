@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { errorMessage } from "@/lib/utils";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
    AlertTriangle,
    ArrowRight,
@@ -7,11 +8,13 @@ import {
    FileAudio,
    FileVideo,
    Loader2,
+   Lock,
    Sparkles,
 } from "lucide-react";
 import { UrlBar } from "@/components/home/UrlBar";
 import { MediaPreview } from "@/components/home/MediaPreview";
 import { PlaylistPreview } from "@/components/home/PlaylistPreview";
+import { MusicLinkPanel } from "@/components/home/MusicLinkPanel";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -20,12 +23,19 @@ import { useQueueStore } from "@/stores/queue";
 import { useSettingsStore } from "@/stores/settings";
 import { api, clipboard } from "@/lib/api";
 import { toast } from "@/stores/toast";
-import type { MediaFormat, QualityOption } from "@/lib/types";
+import type {
+   DownloadRequest,
+   MediaFormat,
+   MediaInfo,
+   MusicTrack,
+   QualityOption,
+} from "@/lib/types";
 import { ACTIVE_STATUSES } from "@/lib/constants";
 import { formatBytes } from "@/lib/format";
 
 export function HomeView() {
-   const { analyzing, analysisError, media, playlist, analyze } = useAppStore();
+   const { analyzing, analysisError, media, playlist, musicLink, analyze } =
+      useAppStore();
    const deps = useAppStore((s) => s.deps);
    const setView = useAppStore((s) => s.setView);
    const refreshDeps = useAppStore((s) => s.refreshDeps);
@@ -41,6 +51,16 @@ export function HomeView() {
    );
    const [starting, setStarting] = useState(false);
 
+   // Settings load after Home first renders, so the initial state above often
+   // saw null and fell back to MP3/best. Apply the saved defaults once they arrive.
+   const appliedDefaults = useRef(false);
+   useEffect(() => {
+      if (!settings || appliedDefaults.current) return;
+      appliedDefaults.current = true;
+      setFormat((settings.defaultFormat as MediaFormat) ?? "mp3");
+      setQuality((settings.defaultQuality as QualityOption) ?? "best");
+   }, [settings]);
+
    const activeJobs = useMemo(
       () => jobs.filter((j) => ACTIVE_STATUSES.includes(j.status)),
       [jobs],
@@ -55,7 +75,10 @@ export function HomeView() {
          title?: string | null;
          thumbnail?: string | null;
          index?: number | null;
+         /** What analysis already learned, so the queue need not look it up again. */
+         extra?: Partial<DownloadRequest>;
       }[],
+      opts: { stayHere?: boolean } = {},
    ) => {
       if (!items.length) {
          toast(
@@ -78,6 +101,7 @@ export function HomeView() {
                playlistIndex: item.index ?? null,
                duration: media?.duration ?? null,
                extractor: media?.extractor ?? playlist?.extractor ?? null,
+               ...item.extra,
             });
          }
          const label = items.length === 1 ? "1 item" : `${items.length} items`;
@@ -88,16 +112,64 @@ export function HomeView() {
                : "Added to the download queue.",
             "success",
          );
-         setView("downloads");
+         if (!opts.stayHere) setView("downloads");
       } catch (e) {
          toast(
             "Could not start download",
-            (e as Error)?.message ?? "Unknown error",
+            errorMessage(e),
             "destructive",
          );
       } finally {
          setStarting(false);
       }
+   };
+
+   // Analysis already has everything the queue needs; sending it avoids a
+   // second lookup that left the job "Untitled" and "Fetching…" for seconds.
+   const mediaDetails = (m: MediaInfo): Partial<DownloadRequest> => ({
+      title: m.title,
+      thumbnail: m.thumbnail,
+      mediaId: m.id,
+      uploader: m.uploader,
+      channel: m.channel,
+      artist: m.artist,
+      album: m.album,
+      track: m.track,
+      uploadDate: m.uploadDate,
+      releaseDate: m.releaseDate,
+      genre: m.genre,
+      trackNumber: m.trackNumber,
+      duration: m.duration,
+      extractor: m.extractor,
+   });
+
+   const handleSaveMusic = (
+      match: MediaInfo,
+      track: MusicTrack,
+      album: string | null,
+      cover: string | null,
+   ) => {
+      const name = track.artists ? `${track.artists} - ${track.title}` : track.title;
+      handleDownload(
+         [
+            {
+               url: match.webpageUrl ?? match.originalUrl ?? "",
+               extra: {
+                  ...mediaDetails(match),
+                  // Name and tag the file after the song the user asked for,
+                  // not after however the upload happens to be titled.
+                  title: name,
+                  artist: track.artists || null,
+                  track: track.title,
+                  album: album ?? null,
+                  thumbnail: cover ?? match.thumbnail,
+                  playlistTitle: album ?? null,
+               },
+            },
+         ],
+         // From an album or playlist the user is likely to pick more songs.
+         { stayHere: musicLink?.kind !== "track" },
+      );
    };
 
    const handleBrowseDestination = async () => {
@@ -113,12 +185,11 @@ export function HomeView() {
          {/* Hero */}
          <div className="pt-2">
             <h1 className="text-2xl font-semibold tracking-tight text-balance">
-               What do you want to download today?
+               What are we listening to today?
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-               Paste a link, we analyze it locally, and you choose the format
-               and quality. Everything is processed on your machine with yt-dlp
-               + FFmpeg.
+               Paste a link or search for a song. Amen saves it on your PC, ready
+               to play or to remix in the Studio. No account, no cloud.
             </p>
          </div>
 
@@ -142,7 +213,11 @@ export function HomeView() {
                ok={deps?.outputDir.ok}
                label="Output folder"
             />
-            {!deps?.ytdlp.found || !deps?.ffmpeg.found ? (
+            {!deps ? (
+               <span className="ml-1 inline-flex items-center gap-1 text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Checking…
+               </span>
+            ) : !deps.ytdlp.found || !deps.ffmpeg.found ? (
                <Button
                   variant="outline"
                   size="sm"
@@ -167,7 +242,27 @@ export function HomeView() {
          {/* Analysis states */}
          {analyzing && <AnalyzingSkeleton />}
 
-         {!analyzing && analysisError && (
+         {!analyzing && analysisError?.code === "protected_service" && (
+            <div className="animate-slide-up flex items-start gap-3 rounded-2xl border border-border bg-card p-5">
+               <Lock className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+               <div className="flex-1">
+                  <h3 className="font-semibold">{analysisError.message}</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                     {analysisError.detail}
+                  </p>
+                  <Button
+                     size="sm"
+                     variant="outline"
+                     className="mt-3"
+                     onClick={() => useAppStore.getState().clearAnalysis()}
+                  >
+                     OK
+                  </Button>
+               </div>
+            </div>
+         )}
+
+         {!analyzing && analysisError && analysisError.code !== "protected_service" && (
             <div className="animate-slide-up rounded-2xl border border-destructive/25 bg-destructive/5 p-5">
                <div className="flex items-start gap-3">
                   <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
@@ -237,15 +332,32 @@ export function HomeView() {
                onBrowseDestination={handleBrowseDestination}
                onDownload={() =>
                   handleDownload([
-                     { url: media.webpageUrl ?? media.originalUrl ?? "" },
+                     {
+                        url: media.webpageUrl ?? media.originalUrl ?? "",
+                        extra: mediaDetails(media),
+                     },
                   ])
                }
                downloading={starting}
             />
          )}
 
+         {!analyzing && !analysisError && musicLink && (
+            <MusicLinkPanel
+               format={format}
+               setFormat={setFormat}
+               quality={quality}
+               setQuality={setQuality}
+               destination={destination}
+               onBrowseDestination={handleBrowseDestination}
+               onSave={handleSaveMusic}
+               downloading={starting}
+            />
+         )}
+
          {!analyzing && !analysisError && playlist && (
             <PlaylistPreview
+               key={playlist.id ?? playlist.webpageUrl ?? playlist.title ?? ""}
                playlist={playlist}
                format={format}
                setFormat={setFormat}
@@ -332,16 +444,22 @@ export function HomeView() {
 }
 
 function HealthChip({ ok, label }: { ok?: boolean; label: string }) {
+   // undefined = still checking: neither a pass nor a warning yet.
+   const pending = ok === undefined;
    return (
       <span
          className={
             "inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 " +
-            (ok
-               ? "border-success/25 bg-success/10 text-success"
-               : "border-warning/30 bg-warning/10 text-warning")
+            (pending
+               ? "border-border bg-muted/50 text-muted-foreground"
+               : ok
+                 ? "border-success/25 bg-success/10 text-success"
+                 : "border-warning/30 bg-warning/10 text-warning")
          }
       >
-         {ok ? (
+         {pending ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+         ) : ok ? (
             <CheckCircle2 className="h-3 w-3" />
          ) : (
             <CircleAlert className="h-3 w-3" />

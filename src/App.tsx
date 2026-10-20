@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { Toaster } from "@/components/ui/toast";
+import { UiDialogHost } from "@/components/UiDialogHost";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { HomeView } from "@/views/HomeView";
 import { DownloadsView } from "@/views/DownloadsView";
@@ -11,7 +12,7 @@ import { StudioView } from "@/views/StudioView";
 import { useAppStore } from "@/stores/app";
 import { useQueueStore, initQueueEvents } from "@/stores/queue";
 import { useSettingsStore } from "@/stores/settings";
-import { clipboard } from "@/lib/api";
+import { clipboard, onEvent } from "@/lib/api";
 import { normalizeUrl, isHttpUrl } from "@/lib/url";
 import { toast } from "@/stores/toast";
 
@@ -36,6 +37,13 @@ export default function App() {
       useQueueStore.getState().refresh();
       useAppStore.getState().refreshDeps();
       useAppStore.getState().checkForYtdlpUpdateOncePerDay();
+
+      // Dependency-install progress is tracked app-wide (not inside
+      // Diagnostics), so leaving that view mid-install and coming back still
+      // shows live progress instead of a re-enabled Install button.
+      const unlistenInstall = onEvent("install-progress", (p) =>
+         useAppStore.getState().setInstallProgress(p),
+      );
 
       // Clipboard monitoring (opt-in via Settings → Advanced).
       // Deliberately a low-frequency poll only while the setting is on.
@@ -81,6 +89,7 @@ export default function App() {
       return () => {
          stopClipboardWatch();
          sub();
+         unlistenInstall.then((fn) => fn()).catch(() => undefined);
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
    }, []);
@@ -95,6 +104,8 @@ export default function App() {
                <Current />
             </main>
             <Toaster />
+            {/* In-app confirm/alert/prompt — one host for every view */}
+            <UiDialogHost />
          </div>
       </TooltipProvider>
    );

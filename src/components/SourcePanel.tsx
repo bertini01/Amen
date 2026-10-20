@@ -4,6 +4,8 @@ import type { StudioSource } from "../lib/studioTypes";
 import { formatTime } from "../lib/studioTime";
 import { colorForSource } from "../lib/studioColors";
 import { open } from "../lib/dialog";
+import { errorMessage } from "../lib/utils";
+import { toast } from "../stores/toast";
 
 interface SourcePanelProps {
    sources: StudioSource[];
@@ -39,7 +41,9 @@ export function SourcePanel({
             await onAddSource?.(selected);
          }
       } catch (e) {
-         console.error("Failed to open file dialog:", e);
+         // onAddSource reports its own import failures; this is the picker
+         // itself failing, which used to reach only the console.
+         toast("Couldn't open the file picker", errorMessage(e), "destructive");
       }
    }, [onAddSource]);
 

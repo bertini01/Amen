@@ -1,5 +1,5 @@
 use crate::analyze;
-use crate::arggen::{build_fields, build_ytdlp_args};
+use crate::arggen::{build_fields, build_ytdlp_args, tag_override_args, TagOverride};
 use crate::config::AppSettings;
 use crate::error::{AppError, AppResult};
 use crate::history::{HistoryDb, HistoryItem, PersistedJob};
@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -86,6 +87,10 @@ pub struct DownloadRequest {
     pub playlist_index: Option<i64>,
     pub duration: Option<f64>,
     pub extractor: Option<String>,
+    /// Skip duplicate detection: History's "Download again" is an explicit
+    /// request and must never be answered with "Skipped".
+    #[serde(default)]
+    pub force: Option<bool>,
 }
 
 struct ManagerInner {
@@ -93,6 +98,17 @@ struct ManagerInner {
     queue: VecDeque<String>,
     running: HashMap<String, u32>,
     cancelled: HashSet<String>,
+    /// Jobs submitted with `force` (kept outside `Job`, which is also built
+    /// by the integration tests).
+    forced: HashSet<String>,
+    /// Tags the request supplied explicitly, written instead of yt-dlp's own.
+    tags: HashMap<String, TagOverride>,
+}
+
+/// Why a worker must stop before or between its stages.
+enum Stop {
+    Cancelled,
+    Removed,
 }
 
 pub struct DownloadManager {
@@ -118,6 +134,8 @@ impl DownloadManager {
                 queue: VecDeque::new(),
                 running: HashMap::new(),
                 cancelled: HashSet::new(),
+                forced: HashSet::new(),
+                tags: HashMap::new(),
             }),
             history,
             app: Mutex::new(None),
@@ -143,6 +161,8 @@ impl DownloadManager {
     pub fn submit(self: &Arc<Self>, req: DownloadRequest) -> AppResult<Job> {
         let id = uuid::Uuid::new_v4().to_string();
         let now = now_ms();
+        let force = req.force.unwrap_or(false);
+        let tags = TagOverride::from_request(&req);
         let job = Job {
             id: id.clone(),
             url: req.url,
@@ -182,6 +202,12 @@ impl DownloadManager {
             let mut inner = self.inner.lock().unwrap();
             inner.jobs.insert(id.clone(), job.clone());
             inner.queue.push_back(id.clone());
+            if force {
+                inner.forced.insert(id.clone());
+            }
+            if !tags.is_empty() {
+                inner.tags.insert(id.clone(), tags);
+            }
         }
         self.persist_job(&job);
         logger::job_info(&id, "submit", &format!("Queued {} ({})", redact_url(&job.url), job.format));
@@ -191,11 +217,22 @@ impl DownloadManager {
 
     pub fn cancel(self: &Arc<Self>, id: &str) -> AppResult<()> {
         let mut inner = self.inner.lock().unwrap();
-        if let Some(pid) = inner.running.get(id) {
-            if *pid != 0 {
-                kill_tree(*pid);
-            }
+        if let Some(pid) = inner.running.get(id).copied() {
+            // Record the cancel first: the worker checks it when the process
+            // dies, and before it spawns one (pid 0 = still fetching info).
             inner.cancelled.insert(id.to_string());
+            if pid == 0 {
+                if let Some(j) = inner.jobs.get_mut(id) {
+                    j.stage = Some("Cancelling…".to_string());
+                }
+            }
+            // taskkill can take a while; never run it under the manager lock.
+            drop(inner);
+            if pid != 0 {
+                kill_tree(pid);
+            } else {
+                self.emit_job(id);
+            }
             return Ok(());
         }
         let is_pending = inner
@@ -252,16 +289,20 @@ impl DownloadManager {
     }
 
     pub fn remove_job(self: &Arc<Self>, id: &str) -> AppResult<()> {
-        let mut inner = self.inner.lock().unwrap();
-        if let Some(pid) = inner.running.get(id) {
-            if *pid != 0 {
-                kill_tree(*pid);
-            }
+        let pid = {
+            let mut inner = self.inner.lock().unwrap();
+            inner.queue.retain(|q| q != id);
+            inner.cancelled.remove(id);
+            inner.forced.remove(id);
+            inner.tags.remove(id);
+            inner.jobs.remove(id);
+            // The worker owns its `running` entry and drops it once it sees
+            // the job is gone.
+            inner.running.get(id).copied().unwrap_or(0)
+        };
+        if pid != 0 {
+            kill_tree(pid);
         }
-        inner.queue.retain(|q| q != id);
-        inner.cancelled.remove(id);
-        inner.jobs.remove(id);
-        drop(inner);
         self.history.delete_job(id).ok();
         Ok(())
     }
@@ -285,6 +326,8 @@ impl DownloadManager {
             .collect();
         for id in terminal {
             inner.jobs.remove(&id);
+            inner.forced.remove(&id);
+            inner.tags.remove(&id);
             self.history.delete_job(&id).ok();
         }
         Ok(())
@@ -297,7 +340,13 @@ impl DownloadManager {
         jobs
     }
 
+    /// Bring back the previous session's queue, or forget it when the user
+    /// chose to start with an empty queue (Settings → startup behaviour).
     pub fn restore_persisted_jobs(self: &Arc<Self>) {
+        if !should_restore_queue(&AppSettings::load()) {
+            self.history.clear_jobs().ok();
+            return;
+        }
         let jobs = self.history.load_jobs().unwrap_or_default();
         let mut inner = self.inner.lock().unwrap();
         for pj in jobs {
@@ -404,11 +453,16 @@ impl DownloadManager {
         let Some(app) = self.app_handle() else {
             return;
         };
-        let job = {
+        let (job, force, tags) = {
             let inner = self.inner.lock().unwrap();
-            inner.jobs.get(id).cloned()
+            (
+                inner.jobs.get(id).cloned(),
+                inner.forced.contains(id),
+                inner.tags.get(id).cloned().unwrap_or_default(),
+            )
         };
         let Some(mut job) = job else {
+            self.release_slot(id);
             return;
         };
 
@@ -418,7 +472,14 @@ impl DownloadManager {
         if job.title.is_none() || job.media_id.is_none() {
             self.set_status(id, STATUS_FETCHING, Some("Fetching media information…"));
             self.emit_job(id);
-            match analyze::fetch_media(&job.url) {
+            let fetched = analyze::fetch_media(&job.url);
+            // Cancel or Remove pressed while fetching only marked the job:
+            // there was no download process to kill yet.
+            if let Some(stop) = self.stop_requested(id) {
+                self.stop(id, stop, &app);
+                return;
+            }
+            match fetched {
                 Ok(f) => {
                     job.title = f.media.title.clone();
                     job.thumbnail = f.media.thumbnail.clone();
@@ -435,11 +496,17 @@ impl DownloadManager {
                     job.genre = f.media.genre.clone();
                     job.track_number = f.media.track_number;
                     job.url = f.url;
-                    self.inner
-                        .lock()
-                        .unwrap()
-                        .jobs
-                        .insert(id.to_string(), job.clone());
+                    // Update in place only: re-inserting would bring back a
+                    // job that was removed meanwhile.
+                    let mut inner = self.inner.lock().unwrap();
+                    match inner.jobs.get_mut(id) {
+                        Some(slot) => *slot = job.clone(),
+                        None => {
+                            drop(inner);
+                            self.stop(id, Stop::Removed, &app);
+                            return;
+                        }
+                    }
                 }
                 Err(e) => {
                     self.fail(id, &e, None, &app);
@@ -448,20 +515,21 @@ impl DownloadManager {
             }
         }
 
-        // 2. Duplicate detection by stable media ID (history).
+        // 2. Duplicate detection: same media, same format, file still on disk.
         let mut force_overwrite = false;
-        if let Some(mid) = &job.media_id {
-            if let Some(existing) = self.history.find_completed_by_media_id(mid) {
-                match settings.duplicate_handling.as_str() {
-                    "skip" => {
-                        logger::job_info(id, "duplicate", "Already downloaded — skipping per settings");
-                        self.finish_skipped(id, existing.file_path, &app);
-                        return;
+        let mut force_new_copy = false;
+        if !force {
+            if let Some(mid) = &job.media_id {
+                if let Some(existing) = self.history.find_completed_duplicate(mid, &job.format) {
+                    match settings.duplicate_handling.as_str() {
+                        "replace" => force_overwrite = true,
+                        "new_copy" => force_new_copy = true,
+                        _ => {
+                            logger::job_info(id, "duplicate", "Already downloaded — skipping per settings");
+                            self.finish_skipped(id, existing.file_path, &app);
+                            return;
+                        }
                     }
-                    "replace" => {
-                        force_overwrite = true;
-                    }
-                    _ => {}
                 }
             }
         }
@@ -478,7 +546,7 @@ impl DownloadManager {
         // 4. Compute a safe output path.
         let ext = if job.format == "mp4" { "mp4" } else { "mp3" };
         let fields = build_fields(&job, ext);
-        let mut out_path = match build_output_path(
+        let planned = match build_output_path(
             &settings.output_dir,
             &settings.filename_template,
             &fields,
@@ -490,16 +558,33 @@ impl DownloadManager {
                 return;
             }
         };
-        if settings.overwrite_behavior == "new_copy" {
-            out_path = unique_path(&out_path);
-        } else if settings.overwrite_behavior == "skip" && !force_overwrite && out_path.exists() {
+        // A file already at that name that history records for a DIFFERENT
+        // song (long titles are sliced and can collide) is not this download:
+        // never skip or overwrite it, write a numbered copy instead.
+        let other_song = planned.exists()
+            && job.media_id.is_some()
+            && self
+                .history
+                .media_id_for_file(&planned.to_string_lossy())
+                .is_some_and(|m| Some(m) != job.media_id);
+        // A forced download ("Download again") never ends as "Skipped": if
+        // the file is still there it gets a new copy unless set to replace.
+        let chosen = if other_song {
+            Some(unique_path(&planned))
+        } else {
+            choose_output_path(&planned, &settings.overwrite_behavior, force_overwrite, force_new_copy || force)
+        };
+        let Some(out_path) = chosen else {
             logger::job_info(id, "existing_file", "Output file already exists — skipping per settings");
-            self.finish_skipped(id, out_path.to_string_lossy().to_string(), &app);
+            self.finish_skipped(id, planned.to_string_lossy().to_string(), &app);
             return;
-        }
+        };
 
         // 5. Build arguments (structured array, no shell).
-        let args = build_ytdlp_args(&job, &settings, &tools, &out_path, force_overwrite);
+        let mut args = build_ytdlp_args(&job, &settings, &tools, &out_path, force_overwrite);
+        if settings.embed_metadata {
+            args.extend(tag_override_args(&tags));
+        }
         logger::job_info(
             id,
             "spawn",
@@ -510,7 +595,11 @@ impl DownloadManager {
             ),
         );
 
-        // 6. Spawn the process.
+        // 6. Spawn the process, unless a cancel or removal arrived meanwhile.
+        if let Some(stop) = self.stop_requested(id) {
+            self.stop(id, stop, &app);
+            return;
+        }
         let mut cmd = new_command(&tools.ytdlp);
         cmd.args(&args);
         cmd.stdout(Stdio::piped())
@@ -523,61 +612,67 @@ impl DownloadManager {
                 return;
             }
         };
-        {
+        // Publish the pid and re-check under one lock: a cancel that landed
+        // between the check above and here saw pid 0 and killed nothing.
+        let late_stop = {
             let mut inner = self.inner.lock().unwrap();
-            inner.running.insert(id.to_string(), child.id());
-            inner.cancelled.remove(id);
+            let stop = if !inner.jobs.contains_key(id) {
+                Some(Stop::Removed)
+            } else if inner.cancelled.contains(id) {
+                Some(Stop::Cancelled)
+            } else {
+                None
+            };
+            if stop.is_none() {
+                inner.running.insert(id.to_string(), child.id());
+            }
+            stop
+        };
+        if let Some(stop) = late_stop {
+            kill_tree(child.id());
+            let _ = child.kill();
+            let _ = child.wait();
+            self.stop(id, stop, &app);
+            return;
         }
         self.set_status(id, STATUS_DOWNLOADING, Some("Starting download…"));
         self.emit_job(id);
 
-        // 7. Stream output.
+        // 7. Stream output. With --no-quiet, progress and stage lines arrive
+        // on stdout together with the `--print after_move:filepath` line;
+        // stderr carries only errors and warnings.
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
 
-        // stdout carries `--print after_move:filepath` output
-        let final_path_stdout = Arc::new(Mutex::new(None::<String>));
-        if let Some(out) = stdout {
-            let shared = final_path_stdout.clone();
-            let this = self.clone();
-            let id_owned = id.to_string();
+        let stderr_reader = stderr.map(|err| {
             std::thread::spawn(move || {
-                let reader = BufReader::new(out);
-                for line in reader.lines() {
-                    if let Ok(line) = line {
-                        let trimmed = line.trim();
-                        if looks_like_file_path(trimmed) {
-                            *shared.lock().unwrap() = Some(trimmed.to_string());
-                            let mut u = ProgressUpdate::default();
-                            progress::parse_line(trimmed, &mut u);
-                            if let Some(p) = u.output_path {
-                                this.record_output_path(&id_owned, &p);
-                            }
-                        }
+                let mut text = String::new();
+                for line in lossy_lines(BufReader::new(err)) {
+                    text.push_str(&line);
+                    text.push('\n');
+                    if text.len() > 200_000 {
+                        text = text.split_off(text.len() - 100_000);
                     }
                 }
-            });
-        }
+                text
+            })
+        });
 
         let mut update = ProgressUpdate::default();
         let mut last_emit = Instant::now();
-        let mut last_final_path: Option<String> = None;
-        let mut stderr_text = String::new();
+        let mut printed_path: Option<String> = None;
+        let mut last_destination: Option<String> = None;
 
-        if let Some(err_stream) = stderr {
-            let reader = BufReader::new(err_stream);
-            for line in reader.lines() {
-                let Ok(line) = line else { continue };
-                stderr_text.push_str(&line);
-                stderr_text.push('\n');
-                if stderr_text.len() > 200_000 {
-                    stderr_text = stderr_text.split_off(stderr_text.len() - 100_000);
+        if let Some(out) = stdout {
+            for line in lossy_lines(BufReader::new(out)) {
+                let trimmed = line.trim();
+                if looks_like_file_path(trimmed) {
+                    printed_path = Some(trimmed.to_string());
                 }
-                progress::parse_line(&line, &mut update);
+                update.output_path = None;
+                progress::parse_line(trimmed, &mut update);
                 if let Some(p) = update.output_path.clone() {
-                    last_final_path = Some(p.clone());
-                }
-                if let Some(p) = update.output_path.clone() {
+                    last_destination = Some(p.clone());
                     self.record_output_path(id, &p);
                 }
 
@@ -610,19 +705,25 @@ impl DownloadManager {
         }
 
         let status = child.wait();
-        {
+        let stderr_text = stderr_reader
+            .and_then(|h| h.join().ok())
+            .unwrap_or_default();
+        let (is_cancelled, removed) = {
             let mut inner = self.inner.lock().unwrap();
             inner.running.remove(id);
+            (inner.cancelled.contains(id), !inner.jobs.contains_key(id))
+        };
+
+        // 8. Finalize. The `--print after_move:filepath` line is the final
+        // file; a Destination line may name an intermediate (.webm, .f137.mp4).
+        let reported = printed_path.or(last_destination);
+        if removed {
+            self.stop(id, Stop::Removed, &app);
+            return;
         }
-
-        let is_cancelled = self.inner.lock().unwrap().cancelled.contains(id);
-        let _exit_code = status.as_ref().ok().and_then(|s| s.code());
-
-        // 8. Finalize.
         if update.skipped {
-            let p = last_final_path
+            let p = reported
                 .clone()
-                .or_else(|| final_path_stdout.lock().unwrap().clone())
                 .unwrap_or_else(|| out_path.to_string_lossy().to_string());
             self.finish_skipped(id, p, &app);
             return;
@@ -637,12 +738,41 @@ impl DownloadManager {
             return;
         }
 
-        let final_path = last_final_path
-            .clone()
-            .or_else(|| final_path_stdout.lock().unwrap().clone())
-            .unwrap_or_else(|| out_path.to_string_lossy().to_string());
+        let final_path = choose_final_path(reported.as_deref(), &out_path);
         let file_size = std::fs::metadata(&final_path).ok().map(|m| m.len() as i64);
         self.finish_completed(id, &final_path, file_size, &app);
+    }
+
+    /// A cancel or removal requested while the worker was busy elsewhere.
+    fn stop_requested(&self, id: &str) -> Option<Stop> {
+        let inner = self.inner.lock().unwrap();
+        if !inner.jobs.contains_key(id) {
+            Some(Stop::Removed)
+        } else if inner.cancelled.contains(id) {
+            Some(Stop::Cancelled)
+        } else {
+            None
+        }
+    }
+
+    fn stop(self: &Arc<Self>, id: &str, stop: Stop, app: &tauri::AppHandle) {
+        match stop {
+            Stop::Cancelled => {
+                logger::job_info(id, "cancel", "Cancelled");
+                self.finish_cancelled(id, app);
+            }
+            Stop::Removed => self.release_slot(id),
+        }
+    }
+
+    /// Give up the concurrency slot of a job that no longer exists.
+    fn release_slot(self: &Arc<Self>, id: &str) {
+        {
+            let mut inner = self.inner.lock().unwrap();
+            inner.running.remove(id);
+            inner.cancelled.remove(id);
+        }
+        self.pump();
     }
 
     // ---------- helpers ----------
@@ -698,7 +828,10 @@ impl DownloadManager {
         let now = now_ms();
         let job = {
             let mut inner = self.inner.lock().unwrap();
+            inner.cancelled.remove(id);
             let Some(j) = inner.jobs.get_mut(id) else {
+                drop(inner);
+                self.pump();
                 return;
             };
             j.status = STATUS_COMPLETED.to_string();
@@ -731,6 +864,9 @@ impl DownloadManager {
         logger::job_info(id, "completed", &format!("Saved to {}", path));
         let _ = app.emit("download-finished", &job);
         self.emit_job(id);
+        if AppSettings::load().notify_on_complete {
+            notify_completed(app, job.title.as_deref().unwrap_or("Download"), path);
+        }
         self.pump();
     }
 
@@ -738,7 +874,11 @@ impl DownloadManager {
         let now = now_ms();
         let job = {
             let mut inner = self.inner.lock().unwrap();
+            inner.running.remove(id);
+            inner.cancelled.remove(id);
             let Some(j) = inner.jobs.get_mut(id) else {
+                drop(inner);
+                self.pump();
                 return;
             };
             j.status = STATUS_SKIPPED.to_string();
@@ -779,6 +919,8 @@ impl DownloadManager {
                 j.stage = Some("Cancelled".to_string());
             }
             inner.cancelled.remove(id);
+            // Set when cancelled before yt-dlp started (pid 0 placeholder).
+            inner.running.remove(id);
         }
         let job = self.inner.lock().unwrap().jobs.get(id).cloned();
         if let Some(job) = job {
@@ -827,9 +969,98 @@ impl DownloadManager {
     }
 }
 
+/// Lines of a child's output, decoded leniently. `BufRead::lines` yields an
+/// error for any line that is not valid UTF-8, and the callers used to skip
+/// such lines, which lost the final file path for titles with emoji.
+fn lossy_lines<R: BufRead>(reader: R) -> impl Iterator<Item = String> {
+    reader.split(b'\n').map_while(Result::ok).map(|bytes| {
+        let line = String::from_utf8_lossy(&bytes).into_owned();
+        line.trim_end_matches('\r').to_string()
+    })
+}
+
+/// The path to record for a finished download. yt-dlp's own report wins when
+/// that file exists; otherwise fall back to the exact path we passed as `-o`.
+/// Recording a path that does not exist breaks Open, Show in folder and
+/// Open in Audio Studio for that history entry.
+fn choose_final_path(reported: Option<&str>, requested: &Path) -> String {
+    match reported {
+        Some(p) if Path::new(p).exists() => p.to_string(),
+        Some(p) if !requested.exists() => p.to_string(),
+        _ => requested.to_string_lossy().to_string(),
+    }
+}
+
+/// Where to write, given the planned path and the settings. `None` means the
+/// file is already there and the job should end as skipped.
+fn choose_output_path(
+    planned: &Path,
+    overwrite_behavior: &str,
+    force_overwrite: bool,
+    force_new_copy: bool,
+) -> Option<PathBuf> {
+    if force_overwrite || overwrite_behavior == "replace" {
+        return Some(planned.to_path_buf());
+    }
+    if force_new_copy || overwrite_behavior == "new_copy" {
+        return Some(unique_path(planned));
+    }
+    if planned.exists() {
+        return None;
+    }
+    Some(planned.to_path_buf())
+}
+
+/// Settings → startup behaviour: "restore" (default) brings the last queue
+/// back; anything else ("empty") starts with an empty queue.
+fn should_restore_queue(settings: &AppSettings) -> bool {
+    settings.startup_behavior != "empty"
+}
+
+/// Windows toast for a finished download (Settings → notify on complete).
+fn notify_completed(app: &tauri::AppHandle, title: &str, path: &str) {
+    let name = Path::new(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| title.to_string());
+    let body = format!("{title}\nSaved as {name}");
+    // A packaged (MSIX) app must send toasts under its own AppUserModelID;
+    // the plugin always uses the bundle identifier, which Windows rejects
+    // for a packaged process, so the toast would silently never appear.
+    #[cfg(windows)]
+    if let Some(aumid) = crate::config::package_app_user_model_id() {
+        let result = tauri_winrt_notification::Toast::new(&aumid)
+            .title("Download complete")
+            .text1(title)
+            .text2(&format!("Saved as {name}"))
+            .show();
+        if let Err(e) = result {
+            logger::info("notify", &format!("Could not show a notification: {e}"));
+        }
+        return;
+    }
+    use tauri_plugin_notification::NotificationExt;
+    if let Err(e) = app
+        .notification()
+        .builder()
+        .title("Download complete")
+        .body(body)
+        .show()
+    {
+        logger::info("notify", &format!("Could not show a notification: {e}"));
+    }
+}
+
+/// A bare path line from `--print after_move:filepath`. Bracketed lines
+/// (`[download] Destination: …`) also end in a media extension and are
+/// progress output, not the final path.
 fn looks_like_file_path(line: &str) -> bool {
+    if line.starts_with('[') {
+        return false;
+    }
     let lower = line.to_lowercase();
-    (line.len() >= 3
+    line.starts_with("\\\\")
+        || (line.len() >= 3
         && line.as_bytes().get(1) == Some(&b':')
         && line.as_bytes().get(2) == Some(&b'\\'))
         || lower.ends_with(".mp3")
@@ -932,7 +1163,54 @@ mod tests {
     #[test]
     fn looks_like_path_win() {
         assert!(looks_like_file_path("C:\\Music\\song.mp3"));
+        assert!(looks_like_file_path("\\\\nas\\music\\song.mp3"));
         assert!(!looks_like_file_path("[download] 42% of 5MiB"));
         assert!(!looks_like_file_path("ERROR: Unsupported URL"));
+        // --no-quiet stdout lines that mention files but are not the result.
+        assert!(!looks_like_file_path("[download] Destination: C:\\Music\\song.webm"));
+        assert!(!looks_like_file_path("[ExtractAudio] Destination: C:\\Music\\song.mp3"));
+        assert!(!looks_like_file_path("Deleting original file C:\\Music\\song.webm (pass -k to keep)"));
+    }
+
+    #[test]
+    fn output_path_follows_settings_and_force() {
+        let dir = std::env::temp_dir().join(format!("amen-outpath-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let free = dir.join("new.mp3");
+        let taken = dir.join("taken.mp3");
+        std::fs::write(&taken, b"x").unwrap();
+
+        // Nothing there yet: always the planned path.
+        assert_eq!(choose_output_path(&free, "skip", false, false), Some(free.clone()));
+        // Existing file + "skip": skipped...
+        assert_eq!(choose_output_path(&taken, "skip", false, false), None);
+        // ...unless the request was forced / duplicate handling said new copy.
+        let copy = choose_output_path(&taken, "skip", false, true).unwrap();
+        assert_ne!(copy, taken);
+        assert!(copy.to_string_lossy().contains("taken (1).mp3"));
+        assert_eq!(choose_output_path(&taken, "new_copy", false, false), Some(copy));
+        // Replace (setting or duplicate handling) writes over it.
+        assert_eq!(choose_output_path(&taken, "replace", false, false), Some(taken.clone()));
+        assert_eq!(choose_output_path(&taken, "skip", true, false), Some(taken.clone()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn startup_behavior_gates_queue_restore() {
+        let mut s = AppSettings::default();
+        assert!(should_restore_queue(&s));
+        s.startup_behavior = "empty".to_string();
+        assert!(!should_restore_queue(&s));
+    }
+
+    #[test]
+    fn download_request_force_is_optional_camel_case() {
+        let base = serde_json::json!({ "url": "https://x/v", "format": "mp3", "quality": "best" });
+        let req: DownloadRequest = serde_json::from_value(base.clone()).unwrap();
+        assert_eq!(req.force, None);
+        let mut forced = base;
+        forced["force"] = serde_json::json!(true);
+        let req: DownloadRequest = serde_json::from_value(forced).unwrap();
+        assert_eq!(req.force, Some(true));
     }
 }

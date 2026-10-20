@@ -48,27 +48,55 @@ pub fn sanitize_filename_component(name: &str) -> String {
         cleaned = format!("_{cleaned}");
     }
 
-    // Cap length to keep path + filename under Windows limits (allow long-path ext)
-    let max_bytes = 170usize;
-    if cleaned.len() <= max_bytes {
-        return cleaned;
+    // A readable maximum; `build_output_path` also caps the whole path.
+    slice_name(&cleaned, MAX_NAME_CHARS, |_| 1)
+}
+
+/// Longest file or folder name we produce, in characters.
+const MAX_NAME_CHARS: usize = 120;
+
+/// Shorten `name` so its length, counted with `unit` per char, is at most
+/// `max`, marking the cut with "…". Cuts at the last space when one is within
+/// the last 30 characters, otherwise between characters (never inside an
+/// emoji or a multi-byte char), and never leaves trailing spaces or
+/// punctuation before the "…".
+fn slice_name(name: &str, max: usize, unit: fn(char) -> usize) -> String {
+    const ELLIPSIS: char = '\u{2026}';
+    const WORD_WINDOW: usize = 30;
+    if name.chars().map(unit).sum::<usize>() <= max {
+        return name.to_string();
     }
-    
-    let mut truncated = String::new();
-    let mut bytes = 0usize;
-    for ch in cleaned.chars() {
-        let sz = ch.len_utf8();
-        // Reserve 3 bytes for '...'
-        if bytes + sz > max_bytes - 3 {
+    let budget = max.saturating_sub(unit(ELLIPSIS));
+    let mut end = 0;
+    let mut used = 0;
+    for (i, c) in name.char_indices() {
+        if used + unit(c) > budget {
             break;
         }
-        truncated.push(ch);
-        bytes += sz;
+        used += unit(c);
+        end = i + c.len_utf8();
     }
-    
-    let mut result = truncated.trim_end_matches(['.', ' ']).to_string();
-    result.push_str("...");
-    result
+    let hard = &name[..end];
+    let cut = if name[end..].starts_with(' ') {
+        hard // the cut already falls between two words
+    } else {
+        match hard.rfind(' ') {
+            Some(i) if i > 0 && hard[i..].chars().count() <= WORD_WINDOW => &hard[..i],
+            _ => hard,
+        }
+    };
+    let trailing = |c: char| {
+        c.is_whitespace()
+            || matches!(c, '.' | ',' | ';' | ':' | '-' | '_' | '\u{2013}' | '\u{2014}' | '\u{200D}' | '\u{FE0F}')
+    };
+    let mut kept = cut.trim_end_matches(trailing);
+    if kept.is_empty() {
+        kept = hard.trim_end_matches(trailing);
+    }
+    if kept.is_empty() {
+        return String::new();
+    }
+    format!("{kept}{ELLIPSIS}")
 }
 
 /// Apply a yt-dlp style `%(field)s` filename template using provided fields.
@@ -78,11 +106,13 @@ pub fn apply_template(template: &str, fields: &HashMap<String, String>) -> Strin
     let re = Regex::new(r"%\(([a-zA-Z0-9_]+)\)s").expect("valid regex");
     re.replace_all(template, |caps: &regex::Captures| {
         let key = &caps[1];
+        // Only the template's own slashes may create folders. A slash inside a
+        // value ("Song A / Song B") used to split the title into a folder and
+        // a file, and the recorded path then pointed at the wrong place.
         fields
             .get(key)
-            .map(|v| v.as_str())
-            .unwrap_or("")
-            .to_string()
+            .map(|v| v.replace(['/', '\\'], "-"))
+            .unwrap_or_default()
     })
     .to_string()
 }
@@ -165,6 +195,15 @@ pub fn build_output_path(
         } else {
             let (stem, _) = split_ext(comp);
             let mut stem = sanitize_filename_component(&stem);
+            // Keep the WHOLE path short enough for yt-dlp's temporary names.
+            let used = utf16_len(&path.to_string_lossy()) + 1 + 1 + ext.len();
+            let budget = MAX_OUTPUT_PATH.saturating_sub(used);
+            if budget < MIN_STEM {
+                return Err(crate::error::AppError::config(
+                    "The output folder path is too long for Windows. Choose a shorter output folder in Settings.",
+                ));
+            }
+            stem = fit_stem(&stem, budget);
             if stem.is_empty() {
                 stem = "media".to_string();
             }
@@ -173,6 +212,23 @@ pub fn build_output_path(
         }
     }
     Ok(path)
+}
+
+/// Longest output path we hand to yt-dlp, in UTF-16 units (what Windows
+/// counts against MAX_PATH = 260). The margin covers what yt-dlp and we add
+/// to the name: ".f251.webm.part", ".temp.mp3", " (12)".
+const MAX_OUTPUT_PATH: usize = 230;
+/// Shortest filename stem worth keeping; below this the folder is too long.
+const MIN_STEM: usize = 16;
+
+fn utf16_len(s: &str) -> usize {
+    s.encode_utf16().count()
+}
+
+/// Shorten a filename stem to at most `max_units` UTF-16 units (see
+/// `slice_name`).
+fn fit_stem(stem: &str, max_units: usize) -> String {
+    slice_name(stem, max_units, char::len_utf16)
 }
 
 fn has_known_media_ext(name: &str) -> bool {
@@ -319,6 +375,123 @@ mod tests {
         fields.insert("title".to_string(), "T".to_string());
         let p = build_output_path("C:\\Music", "../%(title)s.%(ext)s", &fields, "mp3");
         assert!(p.is_err());
+    }
+
+    fn native_base() -> &'static str {
+        if cfg!(windows) {
+            r"C:\Users\someone\Music\Amen"
+        } else {
+            "/home/someone/Music/Amen"
+        }
+    }
+
+    fn title_path(base: &str, title: &str) -> crate::error::AppResult<PathBuf> {
+        let mut fields = HashMap::new();
+        fields.insert("title".to_string(), title.to_string());
+        fields.insert("ext".to_string(), "mp3".to_string());
+        build_output_path(base, "%(title)s.%(ext)s", &fields, "mp3")
+    }
+
+    #[test]
+    fn titles_never_create_folders_or_escape_the_output_dir() {
+        let base = native_base();
+        let long = "Very long worship title ".repeat(17); // ~400 chars
+        for title in [
+            "A / B / C",
+            "..\\evil",
+            "../../evil",
+            "..",
+            "CON",
+            "trailing dots...",
+            "Praise 🙏🙏 🎶 Live",
+            "100% Worship %(id)s",
+            "C:\\Windows\\system32",
+            long.as_str(),
+        ] {
+            let p = title_path(base, title).unwrap();
+            assert_eq!(p.parent(), Some(Path::new(base)), "title {title:?} gave {p:?}");
+            let name = p.file_name().unwrap().to_string_lossy().to_string();
+            assert!(name.ends_with(".mp3"), "{name}");
+            assert!(!name.contains('/') && !name.contains('\\'), "{name}");
+            assert!(utf16_len(&p.to_string_lossy()) <= MAX_OUTPUT_PATH, "{p:?}");
+        }
+        let con = title_path(base, "CON").unwrap();
+        assert!(con.file_name().unwrap().to_string_lossy().starts_with('_'));
+        let dots = title_path(base, "trailing dots...").unwrap();
+        assert_eq!(dots.file_name().unwrap().to_string_lossy(), "trailing dots.mp3");
+    }
+
+    #[test]
+    fn template_slashes_still_make_folders() {
+        let base = native_base();
+        let mut fields = HashMap::new();
+        fields.insert("artist".to_string(), "AC/DC".to_string());
+        fields.insert("title".to_string(), "Back / Black".to_string());
+        fields.insert("ext".to_string(), "mp3".to_string());
+        let p = build_output_path(base, "%(artist)s/%(title)s.%(ext)s", &fields, "mp3").unwrap();
+        assert_eq!(p, PathBuf::from(base).join("AC-DC").join("Back - Black.mp3"));
+    }
+
+    #[test]
+    fn long_titles_are_cut_to_fit_the_whole_path() {
+        // A deep folder plus a long emoji title.
+        let deep = format!("{}{}", native_base(), if cfg!(windows) { r"\Deep\Folder\For\Tests" } else { "/Deep/Folder/For/Tests" });
+        let title = "🙏".repeat(60) + &"word ".repeat(30);
+        let p = title_path(&deep, &title).unwrap();
+        let full = p.to_string_lossy().to_string();
+        assert!(utf16_len(&full) <= MAX_OUTPUT_PATH, "{} units", utf16_len(&full));
+        assert_eq!(p.parent(), Some(Path::new(&deep)));
+        let stem = p.file_stem().unwrap().to_string_lossy().to_string();
+        assert!(stem.ends_with('…'), "{stem}");
+        // Cut between characters: no broken surrogate became U+FFFD.
+        assert!(!stem.contains('\u{FFFD}'));
+        assert!(stem.chars().count() >= MIN_STEM / 2);
+    }
+
+    #[test]
+    fn fit_stem_cuts_on_char_boundaries() {
+        assert_eq!(fit_stem("short", 10), "short");
+        // "…" is one unit, an emoji two.
+        assert_eq!(fit_stem("abc 🙏🙏", 5), "abc…");
+        assert_eq!(fit_stem("abcdefgh", 5), "abcd…");
+        assert_eq!(fit_stem("ab.. cd", 4), "ab…");
+        assert_eq!(fit_stem("a\u{1F468}\u{200D}\u{1F469}", 4), "a\u{1F468}…");
+    }
+
+    #[test]
+    fn long_names_are_sliced_readably_at_a_word() {
+        let long = "Very long worship title ".repeat(17); // 408 chars
+        let s = sanitize_filename_component(&long);
+        assert!(s.chars().count() <= MAX_NAME_CHARS, "{}", s.chars().count());
+        assert!(s.ends_with('…'));
+        assert!(s.ends_with("title…") || s.ends_with("worship…") || s.ends_with("long…") || s.ends_with("Very…"), "{s}");
+        // Idempotent: the sliced name passes sanitizing unchanged.
+        assert_eq!(sanitize_filename_component(&s), s);
+
+        // Emoji-heavy, 125 chars: shortened without splitting any emoji.
+        let emoji = "🙏🎶 Praise ".repeat(12) + "🙏🙏🙏🙏🙏";
+        assert_eq!(emoji.chars().count(), 125);
+        let s = sanitize_filename_component(&emoji);
+        assert!(s.chars().count() <= MAX_NAME_CHARS);
+        assert!(s.ends_with("Praise…"), "{s}");
+        assert!(!s.contains('\u{FFFD}'));
+        assert_eq!(sanitize_filename_component(&s), s);
+
+        // No spaces at all: a hard cut on a char boundary.
+        let solid = "é".repeat(200);
+        let s = sanitize_filename_component(&solid);
+        assert_eq!(s.chars().count(), MAX_NAME_CHARS);
+        assert_eq!(s, "é".repeat(MAX_NAME_CHARS - 1) + "…");
+
+        // Short names are untouched.
+        assert_eq!(sanitize_filename_component("Amazing Grace"), "Amazing Grace");
+    }
+
+    #[test]
+    fn a_too_long_output_folder_is_a_clear_error() {
+        let base = format!("{}{}", native_base(), if cfg!(windows) { "\\x" } else { "/x" }.repeat(100));
+        let err = title_path(&base, "Song").unwrap_err();
+        assert!(err.message.contains("output folder path is too long"));
     }
 
     #[test]

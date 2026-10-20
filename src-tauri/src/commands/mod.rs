@@ -26,6 +26,10 @@ pub struct AppInfo {
     pub default_output_dir: String,
     pub platform: String,
     pub arch: String,
+    /// MSIX package family name when running as the Store build. The
+    /// directories above are then the real on-disk locations (under
+    /// %LOCALAPPDATA%\Packages\<family>\LocalCache), as Explorer sees them.
+    pub package_family_name: Option<String>,
 }
 
 #[tauri::command]
@@ -33,18 +37,19 @@ pub fn get_app_info() -> AppInfo {
     AppInfo {
         app_name: config::APP_NAME.to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
-        data_dir: config::app_data_dir().to_string_lossy().to_string(),
-        tools_dir: config::tools_dir().to_string_lossy().to_string(),
-        logs_dir: config::logs_dir().to_string_lossy().to_string(),
+        data_dir: real_dir(config::app_data_dir()),
+        tools_dir: real_dir(config::tools_dir()),
+        logs_dir: real_dir(config::logs_dir()),
         default_output_dir: config::default_output_dir().to_string_lossy().to_string(),
         platform: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
+        package_family_name: config::package_family_name(),
     }
 }
 
 #[tauri::command]
 pub fn get_logs_dir() -> String {
-    config::logs_dir().to_string_lossy().to_string()
+    real_dir(config::logs_dir())
 }
 
 #[tauri::command]
@@ -64,9 +69,12 @@ pub async fn get_diagnostic_text(
             std::env::consts::OS,
             std::env::consts::ARCH
         ));
-        out.push_str(&format!("Data dir: {}\n", config::app_data_dir().display()));
-        out.push_str(&format!("Tools dir: {}\n", config::tools_dir().display()));
-        out.push_str(&format!("Logs dir: {}\n", config::logs_dir().display()));
+        if let Some(pfn) = config::package_family_name() {
+            out.push_str(&format!("Package: {pfn} (MSIX)\n"));
+        }
+        out.push_str(&format!("Data dir: {}\n", real_dir(config::app_data_dir())));
+        out.push_str(&format!("Tools dir: {}\n", real_dir(config::tools_dir())));
+        out.push_str(&format!("Logs dir: {}\n", real_dir(config::logs_dir())));
         out.push_str(&format!(
             "Output dir: {} ({})\n",
             report.output_dir.path,
@@ -122,4 +130,10 @@ pub async fn get_diagnostic_text(
     })
     .await
     .map_err(|e| AppError::with_detail("diagnostics_failed", "Could not generate diagnostics.", e.to_string()))
+}
+
+/// A data directory as the user and Explorer find it on disk (see
+/// `config::shell_visible_path`; unchanged outside the MSIX package).
+fn real_dir(dir: std::path::PathBuf) -> String {
+    config::shell_visible_path(&dir).to_string_lossy().to_string()
 }

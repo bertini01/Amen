@@ -77,6 +77,8 @@ pub fn parse_line(line: &str, update: &mut ProgressUpdate) {
         if line.starts_with("[ExtractAudio]") || line.starts_with("[Merger]") {
             update.stage = Some("Processing".to_string());
             update.percent = None;
+        } else {
+            update.stage = Some("Downloading".to_string());
         }
         return;
     }
@@ -102,7 +104,9 @@ pub fn parse_line(line: &str, update: &mut ProgressUpdate) {
         if caps.get(4).is_none() && caps.get(5).is_some() {
             update.percent = Some(100.0);
         }
-        if update.stage.is_none() {
+        // With --no-quiet the [youtube]/[info] lines come first and set
+        // "Fetching information"; a progress line means we are past that.
+        if update.stage.is_none() || update.stage.as_deref() == Some("Fetching information") {
             update.stage = Some("Downloading".to_string());
         }
         return;
@@ -218,6 +222,35 @@ mod tests {
         parse_line("[info] https://youtube.com/watch?v=abc: Downloading item 2 of 10", &mut u);
         assert!((u.percent.unwrap() - 10.0).abs() < 0.01);
         assert!(u.stage.as_deref().unwrap().contains("item 2"));
+    }
+
+    /// Real `yt-dlp --print after_move:filepath --no-quiet -x --audio-format
+    /// mp3` stdout (2026.08.19), as the worker reads it.
+    #[test]
+    fn real_no_quiet_mp3_run_reaches_processing() {
+        let lines = [
+            "[youtube] Extracting URL: https://www.youtube.com/watch?v=jNQXAC9IVRw",
+            "[youtube] jNQXAC9IVRw: Downloading webpage",
+            "[info] jNQXAC9IVRw: Downloading 1 format(s): 251",
+            "[download] Destination: C:\\Music\\zoo.webm",
+            "[download]   0.4% of  246.27KiB at  480.56KiB/s ETA 00:00",
+            "[download]  51.6% of  246.27KiB at  311.08KiB/s ETA 00:00",
+            "[download] 100% of  246.27KiB in 00:00:02 at 105.69KiB/s",
+            "[ExtractAudio] Destination: C:\\Music\\zoo.mp3",
+            "Deleting original file C:\\Music\\zoo.webm (pass -k to keep)",
+            "C:\\Music\\zoo.mp3",
+        ];
+        let mut u = ProgressUpdate::default();
+        let mut stages = Vec::new();
+        for line in lines {
+            parse_line(line, &mut u);
+            if stages.last() != u.stage.as_ref() {
+                stages.push(u.stage.clone().unwrap());
+            }
+        }
+        assert_eq!(stages, ["Fetching information", "Downloading", "Processing"]);
+        assert_eq!(u.output_path.as_deref(), Some("C:\\Music\\zoo.mp3"));
+        assert!(!u.skipped);
     }
 
     #[test]

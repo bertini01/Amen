@@ -94,3 +94,11 @@ export function descriptionForError(code: string): string {
          return "Something went wrong.";
    }
 }
+
+/** A Spotify song, album or playlist link (open.spotify.com, spotify.link or a spotify: URI). */
+export function isSpotifyLink(input: string): boolean {
+   const t = input.trim();
+   if (/^spotify:(track|album|playlist|artist):/i.test(t)) return true;
+   const host = hostOf(t);
+   return host === "open.spotify.com" || host === "spotify.link" || host?.endsWith(".spotify.link") === true;
+}

@@ -9,6 +9,8 @@ import {
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app";
 import { useQueueStore } from "@/stores/queue";
+import { useSettingsStore } from "@/stores/settings";
+import { appConfirm } from "@/stores/uiDialog";
 import type { View } from "@/lib/types";
 import { ACTIVE_STATUSES } from "@/lib/constants";
 
@@ -24,6 +26,23 @@ const NAV: { view: View; label: string; icon: typeof Home }[] = [
 export function Sidebar() {
    const view = useAppStore((s) => s.view);
    const setView = useAppStore((s) => s.setView);
+   const navigate = async (next: View) => {
+      if (next === view) return;
+      // Leaving Settings throws its unsaved draft away, so ask first.
+      if (view === "settings" && useSettingsStore.getState().dirty) {
+         const discard = await appConfirm(
+            "You have unsaved settings changes. Leave without saving them?",
+            {
+               title: "Discard changes?",
+               confirmLabel: "Discard",
+               cancelLabel: "Keep editing",
+               destructive: true,
+            },
+         );
+         if (!discard) return;
+      }
+      setView(next);
+   };
    const activeCount = useQueueStore(
       (s) => s.jobs.filter((j) => ACTIVE_STATUSES.includes(j.status)).length,
    );
@@ -34,12 +53,12 @@ export function Sidebar() {
          <div className="flex items-center gap-2.5 px-4 pb-4 pt-5">
             <img
                src="/logo.png"
-               alt="Amen"
+               alt="Amen Studio"
                className="h-8 w-8 rounded-lg object-contain shadow-md shadow-blue-500/20"
             />
             <div className="leading-tight">
                <div className="text-[13px] font-semibold tracking-tight text-foreground">
-                  Amen
+                  Amen <span className="text-primary">Studio</span>
                </div>
                <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                   Listen · Capture · Create
@@ -54,7 +73,7 @@ export function Sidebar() {
                return (
                   <button
                      key={v}
-                     onClick={() => setView(v)}
+                     onClick={() => navigate(v)}
                      className={cn(
                         "group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium transition-colors",
                         active

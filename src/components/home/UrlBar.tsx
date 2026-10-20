@@ -3,7 +3,7 @@ import { ClipboardPaste, Loader2, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { clipboard } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { isHttpUrl, normalizeUrl } from "@/lib/url";
+import { isHttpUrl, isSpotifyLink, normalizeUrl } from "@/lib/url";
 import { toast } from "@/stores/toast";
 
 interface UrlBarProps {
@@ -17,11 +17,16 @@ export function UrlBar({ onAnalyze, analyzing, disabled }: UrlBarProps) {
    const inputRef = useRef<HTMLInputElement>(null);
    const [dragging, setDragging] = useState(false);
 
-   const valid = isHttpUrl(value.trim());
+   const trimmed = value.trim();
+   // Links are analyzed; anything else is a search (the backend searches for
+   // plain text). This used to accept http(s) links only, which made search,
+   // and spotify: links, unreachable.
+   const isLink = isHttpUrl(trimmed) || isSpotifyLink(trimmed);
+   const valid = trimmed.length > 1;
 
    const handleAnalyze = () => {
       if (!valid || analyzing) return;
-      onAnalyze(normalizeUrl(value));
+      onAnalyze(isLink ? normalizeUrl(trimmed) : trimmed);
    };
 
    const handlePaste = async () => {
@@ -29,13 +34,13 @@ export function UrlBar({ onAnalyze, analyzing, disabled }: UrlBarProps) {
       if (!text) {
          toast(
             "Clipboard is empty",
-            "Copy a media URL first, then try again.",
+            "Copy a link or a song name first, then try again.",
             "info",
          );
          return;
       }
       setValue(text);
-      if (isHttpUrl(text)) {
+      if (isHttpUrl(text) || isSpotifyLink(text)) {
          onAnalyze(normalizeUrl(text));
       }
       inputRef.current?.focus();
@@ -88,7 +93,7 @@ export function UrlBar({ onAnalyze, analyzing, disabled }: UrlBarProps) {
                value={value}
                onChange={(e) => setValue(e.target.value)}
                onKeyDown={(e) => e.key === "Enter" && handleAnalyze()}
-               placeholder="Paste a link to music or video you have the right to save…"
+               placeholder="Paste a link or search for a song…"
                spellCheck={false}
                disabled={disabled || analyzing}
                className="h-10 flex-1 bg-transparent text-[15px] text-foreground outline-none placeholder:text-muted-foreground/60 disabled:opacity-60"
@@ -121,14 +126,16 @@ export function UrlBar({ onAnalyze, analyzing, disabled }: UrlBarProps) {
             >
                {analyzing ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
-               ) : (
+               ) : isLink || !trimmed ? (
                   "Analyze"
+               ) : (
+                  "Search"
                )}
             </Button>
          </div>
          <div className="pointer-events-none px-4 pb-1.5 text-[11px] text-muted-foreground/70">
-            or drag &amp; drop a link here · works with most URLs yt-dlp
-            supports
+            Paste a link, or type a song and artist to search · Spotify links
+            work too
          </div>
       </div>
    );

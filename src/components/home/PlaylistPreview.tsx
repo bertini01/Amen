@@ -5,7 +5,7 @@ import { Thumbnail } from "@/components/Thumbnail";
 import { DownloadOptions } from "@/components/home/DownloadOptions";
 import { formatDuration } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { MediaFormat, PlaylistInfo, QualityOption } from "@/lib/types";
+import type { MediaFormat, PlaylistInfo, QualityOption, DownloadRequest } from "@/lib/types";
 
 interface PlaylistPreviewProps {
    playlist: PlaylistInfo;
@@ -21,6 +21,7 @@ interface PlaylistPreviewProps {
          title: string | null;
          thumbnail: string | null;
          index: number | null;
+         extra?: Partial<DownloadRequest>;
       }[],
    ) => void;
    downloading: boolean;
@@ -38,13 +39,15 @@ export function PlaylistPreview({
    downloading,
 }: PlaylistPreviewProps) {
    const entries = playlist.entries;
-   const [selected, setSelected] = useState<Set<string>>(
-      () => new Set(entries.filter((e) => e.id).map((e) => e.id as string)),
-   );
-   const [showAll, setShowAll] = useState(false);
-   
    // For search results, show 5 by default, for playlists show 30
    const isSearch = playlist.extractor?.toLowerCase().includes("search") ?? false;
+   // A search is a list of alternatives: pre-select only the top result, or
+   // one click saved five versions of the same song.
+   const [selected, setSelected] = useState<Set<string>>(() => {
+      const ids = entries.filter((e) => e.id).map((e) => e.id as string);
+      return new Set(isSearch ? ids.slice(0, 1) : ids);
+   });
+   const [showAll, setShowAll] = useState(false);
    const defaultVisible = isSearch ? 5 : 30;
 
    const toggle = (id: string) => {
@@ -174,16 +177,17 @@ export function PlaylistPreview({
                onBrowseDestination={onBrowseDestination}
                onDownload={() =>
                   onDownload(
-                     selectedEntries.map((e) => ({
-                        url:
-                           e.webpageUrl ??
-                           e.originalUrl ??
-                           playlist.webpageUrl ??
-                           "",
-                        title: e.title,
-                        thumbnail: e.thumbnail,
-                        index: e.playlistIndex ?? e.trackNumber,
-                     })),
+                     // An entry without its own link is skipped: falling back
+                     // to the playlist link downloaded a different song.
+                     selectedEntries
+                        .filter((e) => e.webpageUrl ?? e.originalUrl)
+                        .map((e) => ({
+                           url: (e.webpageUrl ?? e.originalUrl)!,
+                           title: e.title,
+                           thumbnail: e.thumbnail,
+                           index: e.playlistIndex ?? e.trackNumber,
+                           extra: { mediaId: e.id, duration: e.duration },
+                        })),
                   )
                }
                downloading={downloading}

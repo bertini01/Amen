@@ -1,5 +1,5 @@
 use crate::config::AppSettings;
-use crate::download::Job;
+use crate::download::{DownloadRequest, Job};
 use crate::tools::ResolvedTools;
 use std::collections::HashMap;
 use std::path::Path;
@@ -59,6 +59,11 @@ pub fn build_ytdlp_args(
     args.push("--no-warnings".to_string());
     args.push("--print".to_string());
     args.push("after_move:filepath".to_string());
+    // `--print` implies --quiet, which hides the [ExtractAudio]/[Merger]
+    // lines that drive the "Processing" stage and the "has already been
+    // downloaded" notice. Everything then goes to stdout (errors stay on
+    // stderr), which is what the worker reads.
+    args.push("--no-quiet".to_string());
 
     if let Some(ffmpeg_dir) = &tools.ffmpeg_dir {
         args.push("--ffmpeg-location".to_string());
@@ -133,9 +138,81 @@ pub fn build_ytdlp_args(
     }
 
     args.push("-o".to_string());
-    args.push(out_template.to_string_lossy().to_string());
+    args.push(escape_output_template(&out_template.to_string_lossy()));
 
     args
+}
+
+/// yt-dlp reads `-o` as an output TEMPLATE, but we pass a fully rendered
+/// path. A literal '%' in it ("100% Worship") must be doubled, or yt-dlp
+/// mangles the name or rejects a stray "%(".
+pub fn escape_output_template(path: &str) -> String {
+    path.replace('%', "%%")
+}
+
+/// Tags a request supplied explicitly (a Spotify/Apple Music link resolved to
+/// a YouTube upload), to be embedded instead of the uploader and video title
+/// yt-dlp would use.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TagOverride {
+    pub artist: Option<String>,
+    pub title: Option<String>,
+    pub album: Option<String>,
+}
+
+impl TagOverride {
+    pub fn from_request(req: &DownloadRequest) -> Self {
+        let keep = |v: &Option<String>| v.as_ref().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        Self {
+            artist: keep(&req.artist),
+            title: keep(&req.track),
+            album: keep(&req.album),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.artist.is_none() && self.title.is_none() && self.album.is_none()
+    }
+}
+
+/// `--parse-metadata` actions that set yt-dlp's `meta_*` fields (which
+/// override the embedded tags) to literal values. Only fields the request
+/// provided are touched.
+pub fn tag_override_args(tags: &TagOverride) -> Vec<String> {
+    let mut args = Vec::new();
+    for (field, value) in [
+        ("artist", &tags.artist),
+        ("title", &tags.title),
+        ("album", &tags.album),
+    ] {
+        if let Some(action) = value.as_deref().and_then(|v| literal_metadata_action(field, v)) {
+            args.push("--parse-metadata".to_string());
+            args.push(action);
+        }
+    }
+    args
+}
+
+/// Build `pre_process:FROM:TO` that stores `value` verbatim in `meta_<field>`.
+///
+/// FROM is an output template, so '%' is doubled. The first unescaped ':'
+/// ends FROM, so ':' is written as "\:". A FROM made only of letters would be
+/// read as a field NAME ("Adele" → %(Adele)s → "NA"), and a value ending in
+/// '\' would escape the separator, so the value is wrapped in '#' and TO's
+/// regex takes it back out. The explicit WHEN stops a value such as "video"
+/// being taken for one.
+fn literal_metadata_action(field: &str, value: &str) -> Option<String> {
+    // TO's `.*` stops at a line break; tags are single-line anyway.
+    let value: String = value
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let value = value.trim();
+    if value.is_empty() {
+        return None;
+    }
+    let from = value.replace('%', "%%").replace(':', "\\:");
+    Some(format!("pre_process:#{from}#:^#(?P<meta_{field}>.*)#$"))
 }
 
 #[cfg(test)]
@@ -253,6 +330,61 @@ mod tests {
         let fields = build_fields(&job, "mp3");
         assert_eq!(fields.get("uploader").map(|s| s.as_str()), Some("Some Artist"));
         assert_eq!(fields.get("ext").map(|s| s.as_str()), Some("mp3"));
+    }
+
+    #[test]
+    fn no_quiet_follows_print_so_stage_lines_are_shown() {
+        let args = build_ytdlp_args(&sample_job(), &AppSettings::default(), &tools(), Path::new("C:\\Music\\out.mp3"), false);
+        let print = args.iter().position(|a| a == "--print").unwrap();
+        let no_quiet = args.iter().position(|a| a == "--no-quiet").unwrap();
+        assert!(no_quiet > print);
+    }
+
+    #[test]
+    fn percent_in_output_path_is_escaped() {
+        let args = build_ytdlp_args(
+            &sample_job(),
+            &AppSettings::default(),
+            &tools(),
+            Path::new("C:\\Music\\100% Worship %(title)s.mp3"),
+            false,
+        );
+        let o = args.iter().position(|a| a == "-o").unwrap();
+        assert_eq!(args[o + 1], "C:\\Music\\100%% Worship %%(title)s.mp3");
+    }
+
+    #[test]
+    fn tag_override_only_for_fields_the_request_gave() {
+        let mut req: DownloadRequest = serde_json::from_value(serde_json::json!({
+            "url": "https://example.com/v", "format": "mp3", "quality": "best",
+            "artist": "Adele", "track": "  ", "album": null
+        }))
+        .unwrap();
+        let tags = TagOverride::from_request(&req);
+        assert_eq!(tags.artist.as_deref(), Some("Adele"));
+        assert_eq!(tags.title, None);
+        assert_eq!(tags.album, None);
+        assert_eq!(
+            tag_override_args(&tags),
+            vec!["--parse-metadata".to_string(), "pre_process:#Adele#:^#(?P<meta_artist>.*)#$".to_string()]
+        );
+
+        req.artist = None;
+        assert!(TagOverride::from_request(&req).is_empty());
+        assert!(tag_override_args(&TagOverride::default()).is_empty());
+    }
+
+    #[test]
+    fn tag_override_escapes_template_and_separator_characters() {
+        let tags = TagOverride {
+            artist: Some("AC:DC 100% \"Live\" 🎸".to_string()),
+            title: Some("Back\\".to_string()),
+            album: Some("video".to_string()),
+        };
+        let args = tag_override_args(&tags);
+        assert_eq!(args[1], "pre_process:#AC\\:DC 100%% \"Live\" 🎸#:^#(?P<meta_artist>.*)#$");
+        assert_eq!(args[3], "pre_process:#Back\\#:^#(?P<meta_title>.*)#$");
+        assert_eq!(args[5], "pre_process:#video#:^#(?P<meta_album>.*)#$");
     }
 
     #[test]

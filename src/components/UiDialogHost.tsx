@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { useUiDialogStore } from "../stores/uiDialog";
+import { Button } from "@/components/ui/button";
+import { dismissRequest, useUiDialogStore } from "../stores/uiDialog";
 
 /**
  * Renders the in-app replacement for window.confirm/alert/prompt (see
- * src/stores/uiDialog.ts for why native dialogs can't be used here). Mount
- * once near the root of the Studio view.
+ * src/stores/uiDialog.ts for why native dialogs can't be used here). Mounted
+ * ONCE at the app root, so it works from every view — and styled with the
+ * app-wide tokens rather than the Studio-only ones, which only exist inside
+ * `.studio-shell`.
  */
 export function UiDialogHost() {
    const request = useUiDialogStore((s) => s.request);
@@ -21,37 +24,46 @@ export function UiDialogHost() {
 
    if (!request) return null;
 
-   const respondConfirm = (ok: boolean) => {
-      if (request.kind === "confirm") request.resolve(ok);
+   const dismiss = () => {
+      dismissRequest(request);
       clear();
    };
-   const respondAlert = () => {
-      if (request.kind === "alert") request.resolve();
+   const accept = () => {
+      if (request.kind === "confirm") request.resolve(true);
+      else if (request.kind === "alert") request.resolve();
+      else if (request.kind === "prompt") request.resolve(value);
       clear();
    };
-   const respondPrompt = (v: string | null) => {
-      if (request.kind === "prompt") request.resolve(v);
+   const choose = (id: string) => {
+      if (request.kind === "choice") request.resolve(id);
       clear();
    };
 
    const handleKeyDown = (e: React.KeyboardEvent) => {
       if (e.key === "Escape") {
-         if (request.kind === "confirm") respondConfirm(false);
-         else if (request.kind === "alert") respondAlert();
-         else respondPrompt(null);
+         e.stopPropagation();
+         dismiss();
       } else if (e.key === "Enter" && request.kind === "prompt") {
-         respondPrompt(value);
+         accept();
       }
    };
 
+   const title = request.kind === "prompt" ? undefined : request.title;
+
    return (
       <div
-         className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200]"
+         className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in"
          data-testid="ui-dialog-host"
+         role="dialog"
+         aria-modal="true"
          onKeyDown={handleKeyDown}
       >
-         <div className="bg-studio-panel rounded-lg border border-studio-border shadow-2xl max-w-sm w-full mx-4 p-5">
-            <p className="text-sm text-studio-text whitespace-pre-line mb-4" data-testid="ui-dialog-message">
+         <div className="mx-4 w-full max-w-sm rounded-xl border border-border bg-popover p-5 text-popover-foreground shadow-xl animate-scale-in">
+            {title && <h2 className="mb-1.5 text-[15px] font-semibold tracking-tight">{title}</h2>}
+            <p
+               className="mb-4 whitespace-pre-line break-words text-sm text-muted-foreground"
+               data-testid="ui-dialog-message"
+            >
                {request.message}
             </p>
 
@@ -63,37 +75,47 @@ export function UiDialogHost() {
                   onChange={(e) => setValue(e.target.value)}
                   data-testid="ui-dialog-input"
                   autoFocus
-                  className="w-full mb-4 px-3 py-1.5 bg-studio-canvas border border-studio-border border border-studio-border rounded text-sm focus:outline-none focus:border-studio-accent"
+                  className="mb-4 w-full rounded-lg border border-input bg-background px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none"
                />
             )}
 
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-wrap justify-end gap-2">
                {request.kind === "alert" ? (
-                  <button
-                     onClick={respondAlert}
-                     autoFocus
-                     data-testid="ui-dialog-ok"
-                     className="px-4 py-1.5 rounded bg-studio-accent hover:brightness-110 text-sm font-medium transition"
-                  >
+                  <Button size="sm" onClick={accept} autoFocus data-testid="ui-dialog-ok">
                      OK
-                  </button>
+                  </Button>
+               ) : request.kind === "choice" ? (
+                  <>
+                     <Button size="sm" variant="ghost" onClick={dismiss} data-testid="ui-dialog-cancel">
+                        {request.cancelLabel}
+                     </Button>
+                     {request.choices.map((c) => (
+                        <Button
+                           key={c.id}
+                           size="sm"
+                           variant={c.primary ? "default" : "outline"}
+                           autoFocus={c.primary}
+                           onClick={() => choose(c.id)}
+                           data-testid={c.primary ? "ui-dialog-ok" : `ui-dialog-choice-${c.id}`}
+                        >
+                           {c.label}
+                        </Button>
+                     ))}
+                  </>
                ) : (
                   <>
-                     <button
-                        onClick={() => (request.kind === "prompt" ? respondPrompt(null) : respondConfirm(false))}
-                        data-testid="ui-dialog-cancel"
-                        className="px-4 py-1.5 rounded bg-studio-canvas border border-studio-border hover:bg-white/10 text-sm transition"
-                     >
-                        Cancel
-                     </button>
-                     <button
-                        onClick={() => (request.kind === "prompt" ? respondPrompt(value) : respondConfirm(true))}
-                        autoFocus
+                     <Button size="sm" variant="outline" onClick={dismiss} data-testid="ui-dialog-cancel">
+                        {request.kind === "confirm" ? (request.cancelLabel ?? "Cancel") : "Cancel"}
+                     </Button>
+                     <Button
+                        size="sm"
+                        variant={request.kind === "confirm" && request.destructive ? "destructive" : "default"}
+                        onClick={accept}
+                        autoFocus={request.kind !== "prompt"}
                         data-testid="ui-dialog-ok"
-                        className="px-4 py-1.5 rounded bg-studio-accent hover:brightness-110 text-sm font-medium transition"
                      >
-                        OK
-                     </button>
+                        {request.kind === "confirm" ? (request.confirmLabel ?? "OK") : "OK"}
+                     </Button>
                   </>
                )}
             </div>

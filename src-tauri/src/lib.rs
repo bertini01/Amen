@@ -7,6 +7,7 @@ mod download;
 mod error;
 mod history;
 mod logger;
+mod music_link;
 mod process;
 mod progress;
 mod tools;
@@ -25,6 +26,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(DownloadManager::new())
         .manage(commands::system::SystemMonitor::new())
         .setup(|app| {
@@ -32,6 +34,13 @@ pub fn run() {
             mgr.set_app(app.handle().clone());
             mgr.restore_persisted_jobs();
             let _ = std::fs::create_dir_all(config::logs_dir());
+            // Studio previews used to be cached in Roaming AppData; that
+            // cache is now local, so drop the old copy from the profile.
+            if config::legacy_cache_dir() != config::cache_dir() {
+                std::thread::spawn(|| {
+                    let _ = std::fs::remove_dir_all(config::legacy_cache_dir());
+                });
+            }
             logger::info("startup", "Application started");
             Ok(())
         })
@@ -44,6 +53,7 @@ pub fn run() {
             commands::settings::select_directory,
             commands::jobs::validate_output_dir,
             commands::analyze::analyze_url,
+            commands::analyze::resolve_music_link,
             commands::jobs::start_download,
             commands::jobs::cancel_download,
             commands::jobs::retry_download,
@@ -53,6 +63,7 @@ pub fn run() {
             commands::history::get_history,
             commands::history::remove_history_item,
             commands::history::clear_history,
+            commands::history::tidy_download_folders,
             commands::fs::open_file,
             commands::fs::open_folder,
             commands::fs::reveal_in_folder,

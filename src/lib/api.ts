@@ -3,6 +3,8 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import type {
    AnalyzeResult,
+   MusicLink,
+   TidyReport,
    AppInfo,
    AppSettings,
    DependencyReport,
@@ -32,6 +34,8 @@ export const api = {
       invoke<void>("validate_output_dir", { path }),
 
    analyzeUrl: (url: string) => invoke<AnalyzeResult>("analyze_url", { url }),
+   resolveMusicLink: (url: string) =>
+      invoke<MusicLink>("resolve_music_link", { url }),
 
    startDownload: (request: DownloadRequest) =>
       invoke<Job>("start_download", { request }),
@@ -56,6 +60,9 @@ export const api = {
    removeHistoryItem: (id: string) =>
       invoke<void>("remove_history_item", { id }),
    clearHistory: () => invoke<void>("clear_history"),
+   /** With preview, only counts; otherwise moves the files and updates History. */
+   tidyDownloadFolders: (preview: boolean) =>
+      invoke<TidyReport>("tidy_download_folders", { preview }),
 
    openFile: (path: string) => invoke<void>("open_file", { path }),
    openFolder: (path: string) => invoke<void>("open_folder", { path }),
@@ -170,7 +177,8 @@ export const clipboard = {
          try {
             await navigator.clipboard.writeText(text);
          } catch {
-            /* ignore */
+            // Callers toast "Copied" on success, so a silent failure lied.
+            throw new Error("Couldn't copy to the clipboard.");
          }
       }
    },

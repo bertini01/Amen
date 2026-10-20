@@ -1,3 +1,4 @@
+use crate::config::shell_visible_path;
 use crate::error::{AppError, AppResult};
 use std::path::PathBuf;
 
@@ -16,8 +17,10 @@ pub fn open_file(app: tauri::AppHandle, path: String) -> AppResult<()> {
     if !p.is_file() {
         return Err(AppError::new("not_file", "The path is not a file."));
     }
+    // The default app runs outside the MSIX package and sees the real disk.
+    let real = shell_visible_path(&p);
     app.opener()
-        .open_path(path, None::<&str>)
+        .open_path(real.to_string_lossy(), None::<&str>)
         .map_err(to_app_error)
 }
 
@@ -27,8 +30,10 @@ pub fn open_folder(app: tauri::AppHandle, path: String) -> AppResult<()> {
     use tauri_plugin_opener::OpenerExt;
     let p = PathBuf::from(&path);
     if p.is_dir() {
+        // Explorer sees the real disk, not the package's redirected AppData.
+        let real = shell_visible_path(&p);
         app.opener()
-            .open_path(path, None::<&str>)
+            .open_path(real.to_string_lossy(), None::<&str>)
             .map_err(to_app_error)
     } else {
         Err(AppError::new("open_failed", "That folder does not exist."))
@@ -43,7 +48,9 @@ pub fn reveal_in_folder(app: tauri::AppHandle, path: String) -> AppResult<()> {
     if !p.exists() {
         return Err(AppError::new("not_found", "The file no longer exists on disk."));
     }
-    
+    let real = shell_visible_path(&p);
+    let path = real.to_string_lossy().to_string();
+
     // Fallback: On some versions of Windows, reveal_item_in_dir might fail for network/mapped drives.
     // We try the plugin first, and if it fails, we fall back to a direct Command.
     match app.opener().reveal_item_in_dir(&path) {

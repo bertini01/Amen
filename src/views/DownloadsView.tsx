@@ -21,13 +21,13 @@ import {
    TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useQueueStore } from "@/stores/queue";
-import { api } from "@/lib/api";
+import { api, clipboard } from "@/lib/api";
 import { toast } from "@/stores/toast";
+import { appConfirm } from "@/stores/uiDialog";
 import { formatBytes, qualityLabel } from "@/lib/format";
 import { ACTIVE_STATUSES, TERMINAL_STATUSES } from "@/lib/constants";
-import { cn } from "@/lib/utils";
-import { useStudioStore } from "@/stores/studio";
-import { useAppStore } from "@/stores/app";
+import { cn, errorMessage } from "@/lib/utils";
+import { openInStudio } from "@/stores/studio";
 import { Scissors } from "lucide-react";
 
 export function DownloadsView() {
@@ -95,12 +95,16 @@ function Header({
                   variant="outline"
                   size="sm"
                   onClick={async () => {
-                     await useQueueStore.getState().clearCompleted();
-                     toast(
-                        "Cleared",
-                        "Completed and failed items removed from the queue.",
-                        "success",
-                     );
+                     try {
+                        await useQueueStore.getState().clearCompleted();
+                        toast(
+                           "Cleared",
+                           "Finished items removed from the queue.",
+                           "success",
+                        );
+                     } catch (e) {
+                        toast("Couldn't clear the queue", errorMessage(e), "destructive");
+                     }
                   }}
                >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -136,9 +140,74 @@ function QueueCard({
       "processing",
    ].includes(job.status);
    const canRetry = ["failed", "cancelled", "interrupted"].includes(job.status);
-   const canOpen = job.status === "completed" && job.outputPath;
+   // A skipped job means the file is already on disk — it's just as openable
+   // as a freshly completed one.
+   const outputPath =
+      (job.status === "completed" || job.status === "skipped") && job.outputPath
+         ? job.outputPath
+         : null;
    const isAudio = job.format === "mp3";
 
+   const cancel = async () => {
+      try {
+         await useQueueStore.getState().cancel(job.id);
+         toast("Cancelled", job.title ?? undefined, "info");
+      } catch (e) {
+         toast("Couldn't cancel", errorMessage(e), "destructive");
+      }
+   };
+
+   const retry = async () => {
+      try {
+         await useQueueStore.getState().retry(job.id);
+         toast("Re-queued", job.title ?? undefined, "success");
+      } catch (e) {
+         toast("Couldn't retry", errorMessage(e), "destructive");
+      }
+   };
+
+   const remove = async () => {
+      if (
+         active &&
+         !(await appConfirm(
+            "This download is still in progress. Removing it from the queue will stop it.",
+            { title: "Remove active download?", confirmLabel: "Remove", destructive: true },
+         ))
+      ) {
+         return;
+      }
+      try {
+         await useQueueStore.getState().removeJob(job.id);
+      } catch (e) {
+         toast("Couldn't remove from queue", errorMessage(e), "destructive");
+      }
+   };
+
+   const openFile = async (path: string) => {
+      try {
+         await api.openFile(path);
+      } catch (e) {
+         toast("Couldn't open the file", errorMessage(e), "destructive");
+      }
+   };
+
+   const reveal = async (path: string) => {
+      try {
+         await api.revealInFolder(path);
+      } catch (e) {
+         toast("Couldn't show the file in its folder", errorMessage(e), "destructive");
+      }
+   };
+
+   const copyDiagnostics = async () => {
+      const detail = `[${job.id}] ${job.title ?? ""}\nURL: ${job.url}\nStatus: ${job.status}\nError: ${job.error}`;
+      try {
+         await clipboard.writeText(detail);
+         toast("Copied", "Job diagnostics copied to clipboard.", "success");
+      } catch (e) {
+         toast("Couldn't copy", errorMessage(e), "destructive");
+      }
+   };
 
    return (
       <div
@@ -170,74 +239,51 @@ function QueueCard({
                            {job.format.toUpperCase()} ·{" "}
                            {qualityLabel(job.quality)}
                         </span>
-                        {job.downloaded != null && job.downloaded > 0 && (
-                           <span>{formatBytes(job.downloaded)}</span>
+                        {job.status === "completed" ? (
+                           // The file on disk, not the last progress line: those
+                           // counted one download stream and kept a stale speed.
+                           job.fileSize != null && <span>{formatBytes(job.fileSize)}</span>
+                        ) : (
+                           <>
+                              {job.downloaded != null && job.downloaded > 0 && (
+                                 <span>{formatBytes(job.downloaded)}</span>
+                              )}
+                              {job.speed && <span>{job.speed}</span>}
+                              {job.eta && <span>ETA {job.eta}</span>}
+                           </>
                         )}
-                        {job.speed && <span>{job.speed}</span>}
-                        {job.eta && <span>ETA {job.eta}</span>}
                      </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                      <StatusBadge status={job.status} />
                      {canCancel && (
-                        <ActionButton
-                           label="Cancel"
-                           onClick={async () => {
-                              await useQueueStore.getState().cancel(job.id);
-                              toast(
-                                 "Cancelled",
-                                 job.title ?? undefined,
-                                 "info",
-                              );
-                           }}
-                        >
+                        <ActionButton label="Cancel" onClick={cancel}>
                            <XCircle className="h-4 w-4 text-destructive" />
                         </ActionButton>
                      )}
                      {canRetry && (
-                        <ActionButton
-                           label="Retry"
-                           onClick={async () => {
-                              await useQueueStore.getState().retry(job.id);
-                              toast(
-                                 "Re-queued",
-                                 job.title ?? undefined,
-                                 "success",
-                              );
-                           }}
-                        >
+                        <ActionButton label="Retry" onClick={retry}>
                            <RefreshCw className="h-4 w-4 text-primary" />
                         </ActionButton>
                      )}
-                     {canOpen && (
+                     {outputPath && (
                         <>
                            <ActionButton
                               label="Open file"
-                              onClick={async () => {
-                                 if (job.outputPath)
-                                    await api.openFile(job.outputPath);
-                              }}
+                              onClick={() => openFile(outputPath)}
                            >
                               <Eye className="h-4 w-4" />
                            </ActionButton>
                            <ActionButton
                               label="Open containing folder"
-                              onClick={async () => {
-                                 if (job.outputPath)
-                                    await api.revealInFolder(job.outputPath);
-                              }}
+                              onClick={() => reveal(outputPath)}
                            >
                               <FolderOpen className="h-4 w-4" />
                            </ActionButton>
                            {isAudio && (
                               <ActionButton
                                  label="Open in Audio Studio"
-                                 onClick={async () => {
-                                    if (job.outputPath) {
-                                       await useStudioStore.getState().addSource(job.outputPath);
-                                       useAppStore.getState().setView("studio");
-                                    }
-                                 }}
+                                 onClick={() => openInStudio(outputPath, job.title)}
                               >
                                  <Scissors className="h-4 w-4" />
                               </ActionButton>
@@ -246,9 +292,7 @@ function QueueCard({
                      )}
                      <ActionButton
                         label="Remove from queue"
-                        onClick={async () => {
-                           await useQueueStore.getState().removeJob(job.id);
-                        }}
+                        onClick={remove}
                      >
                         <Trash2 className="h-4 w-4 text-muted-foreground" />
                      </ActionButton>
@@ -283,6 +327,13 @@ function QueueCard({
                   </div>
                )}
 
+               {job.status === "skipped" && job.stage && (
+                  <p className="mt-2 text-[12px] text-muted-foreground">
+                     {job.stage}
+                     {outputPath ? " — you can still open it." : ""}
+                  </p>
+               )}
+
                {failed && job.error && (
                   <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-destructive/8 px-3 py-2 text-[12px] text-destructive">
                      <span className="flex-1">{job.error}</span>
@@ -290,17 +341,7 @@ function QueueCard({
                         variant="ghost"
                         size="sm"
                         className="h-6 gap-1 px-2 text-[11px]"
-                        onClick={() => {
-                           const detail = `[${job.id}] ${job.title ?? ""}\nURL: ${job.url}\nStatus: ${job.status}\nError: ${job.error}`;
-                           navigator.clipboard
-                              .writeText(detail)
-                              .catch(() => undefined);
-                           toast(
-                              "Copied",
-                              "Job diagnostics copied to clipboard.",
-                              "success",
-                           );
-                        }}
+                        onClick={copyDiagnostics}
                      >
                         Copy diagnostics
                      </Button>
