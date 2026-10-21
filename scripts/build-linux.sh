@@ -60,17 +60,13 @@ tar cf - -C "$SRC" \
     . | (cd "$WORK" && tar xf -)
 
 cd "$WORK"
-# Resolve dependencies fresh rather than with `npm ci`. A lockfile committed
-# from Windows pins Windows-only optional native packages
-# (@rollup/rollup-win32-x64-msvc, @esbuild/win32-x64), so an exact install
-# leaves vite without a native binding and the build fails. This is a staging
-# copy, so the repository's lockfile is not modified.
-echo "==> npm install"
-# Both the lockfile and any existing tree must go: npm keeps optional native
-# packages that are already on disk, so leaving node_modules in place means the
-# Windows-only bindings survive and the Linux ones are never resolved.
-rm -rf node_modules package-lock.json
-npm install --no-audit --no-fund
+# Install exactly what the lockfile pins. It lists every platform's native
+# bindings (rollup, esbuild, tailwind, lightningcss, tauri-cli), so the Linux
+# ones resolve from it. Re-resolving without the lockfile used to be the
+# workaround here; it now crashes npm's peer-dependency resolver ("reading
+# 'edgesOut'") and would install untested versions anyway.
+echo "==> npm ci"
+npm ci --no-audit --no-fund
 
 echo "==> Rust tests"
 (cd src-tauri && cargo test --no-default-features)

@@ -1,0 +1,65 @@
+# Builds the Linux packages (.deb + AppImage) when a version tag is pushed,
+# and attaches them to a DRAFT GitHub release. Nothing is public until the
+# draft is reviewed and published by hand.
+#
+#   git tag v0.4.0 && git push origin v0.4.0
+#
+# Free for public repositories. Windows ships through the Microsoft Store.
+name: Release (Linux)
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    # The oldest Ubuntu with WebKitGTK 4.1: binaries link against the glibc
+    # of the build machine, so building here keeps them running on more distros.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev ffmpeg
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      # The lockfile lists every platform's native bindings; install exactly it.
+      - name: npm ci
+        run: npm ci --no-audit --no-fund
+
+      - name: Tests
+        run: |
+          npm test
+          cd src-tauri && cargo test --lib
+
+      - name: Build
+        run: npx tauri build --bundles deb,appimage
+
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "$GITHUB_REF_TYPE" != "tag" ]]; then TAG="v${VERSION}-linux-test"; fi
+          mkdir -p out
+          find src-tauri/target/release/bundle \( -name '*.deb' -o -name '*.AppImage' \) -exec cp {} out/ \;
+          (cd out && sha256sum * > SHA256SUMS.txt)
+          gh release view "$TAG" >/dev/null 2>&1 \
+            || gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "Amen Studio $VERSION" \
+                 --notes "Linux build. See RELEASE_NOTES.md. Verify downloads with SHA256SUMS.txt."
+          gh release upload "$TAG" out/* --clobber

@@ -6,9 +6,6 @@ use std::time::{Duration, Instant};
 /// Spawn a command on Windows without popping a console window.
 /// Always pass arguments as an array — never via a shell string.
 pub fn new_command(program: &Path) -> Command {
-    // `mut` is only used by the Windows branch below; without this the Linux
-    // build warns on every compile.
-    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut cmd = Command::new(program);
     // yt-dlp is a Python program: piped to us on Windows it writes in the
     // legacy ANSI code page, which cannot represent emoji or most non-Latin
@@ -21,6 +18,14 @@ pub fn new_command(program: &Path) -> Command {
         use std::os::windows::process::CommandExt;
         // 0x08000000 == CREATE_NO_WINDOW
         cmd.creation_flags(0x0800_0000);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // Its own process group, so `kill_tree` can stop everything it starts:
+        // yt-dlp's Linux binary is a launcher that runs the real program, and
+        // that in turn runs FFmpeg.
+        cmd.process_group(0);
     }
     cmd
 }
@@ -72,7 +77,6 @@ pub fn run_capture_full(cmd: &mut Command, timeout_ms: u64) -> Option<CapturedOu
             // yt-dlp.exe is a launcher that runs the real program as a child
             // process; killing only the launcher leaves that child holding
             // the pipes open.
-            #[cfg(windows)]
             kill_tree(child.id());
             let _ = child.kill();
             let _ = child.wait();
@@ -110,14 +114,52 @@ pub fn run_capture(cmd: &mut Command, timeout_ms: u64) -> Option<String> {
     run_capture_full(cmd, timeout_ms).map(|o| o.stdout)
 }
 
-/// Kill a process and its entire child tree on Windows.
-/// Uses `taskkill /PID <pid> /T /F` with structured arguments (no shell interpolation).
+/// Kill a process and everything it started.
+/// Windows: `taskkill /PID <pid> /T /F`. Unix: SIGKILL to the process group
+/// that `new_command` created for it. Structured arguments, no shell.
 pub fn kill_tree(pid: u32) {
-    let mut cmd = new_command(Path::new("taskkill"));
-    cmd.args(["/PID", &pid.to_string(), "/T", "/F"]);
+    #[cfg(windows)]
+    let mut cmd = {
+        let mut cmd = new_command(Path::new("taskkill"));
+        cmd.args(["/PID", &pid.to_string(), "/T", "/F"]);
+        cmd
+    };
+    #[cfg(not(windows))]
+    let mut cmd = {
+        // Plain Command: `kill` itself must not get a new process group.
+        let mut cmd = Command::new("kill");
+        cmd.args(["-KILL", "--", &format!("-{pid}")]);
+        cmd
+    };
     let _ = cmd.stdout(Stdio::null()).stderr(Stdio::null()).status();
 }
 
+
+#[cfg(all(test, unix))]
+mod unix_tests {
+    use super::*;
+
+    #[test]
+    fn kill_tree_stops_the_child_and_its_children() {
+        // A shell that starts a grandchild, then waits: the shape of yt-dlp's
+        // launcher running the real program.
+        let mut cmd = new_command(Path::new("sh"));
+        cmd.args(["-c", "sleep 30 & wait"]);
+        let mut child = cmd.spawn().expect("sh runs");
+        std::thread::sleep(Duration::from_millis(300));
+        let start = Instant::now();
+        kill_tree(child.id());
+        let _ = child.wait();
+        assert!(start.elapsed() < Duration::from_secs(5));
+        // No process is left in the group.
+        let left = Command::new("pgrep")
+            .args(["-g", &child.id().to_string()])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
+        assert!(left.is_empty(), "left behind: {left}");
+    }
+}
 
 #[cfg(all(test, windows))]
 mod tests {
