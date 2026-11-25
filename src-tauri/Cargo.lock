@@ -33,6 +33,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "amply"
+version = "0.5.0"
+dependencies = [
+ "chrono",
+ "dirs 5.0.1",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-clipboard-manager",
+ "tauri-plugin-dialog",
+ "tauri-plugin-notification",
+ "tauri-plugin-opener",
+ "tauri-winrt-notification",
+ "ureq",
+ "uuid",
+ "windows-sys 0.59.0",
+ "zip",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5098,30 +5122,6 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
-]
-
-[[package]]
-name = "wavecrate"
-version = "0.5.0"
-dependencies = [
- "chrono",
- "dirs 5.0.1",
- "regex",
- "rusqlite",
- "serde",
- "serde_json",
- "sysinfo",
- "tauri",
- "tauri-build",
- "tauri-plugin-clipboard-manager",
- "tauri-plugin-dialog",
- "tauri-plugin-notification",
- "tauri-plugin-opener",
- "tauri-winrt-notification",
- "ureq",
- "uuid",
- "windows-sys 0.59.0",
- "zip",
 ]
 
 [[package]]

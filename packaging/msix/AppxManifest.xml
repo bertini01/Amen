@@ -33,7 +33,7 @@
   </Resources>
 
   <Applications>
-    <Application Id="Amen" Executable="wavecrate.exe" EntryPoint="Windows.FullTrustApplication">
+    <Application Id="Amen" Executable="amply.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
         DisplayName="{{DisplayName}}"
         Description="Local media downloader and audio studio powered by yt-dlp and FFmpeg."

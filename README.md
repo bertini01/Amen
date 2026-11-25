@@ -1,4 +1,4 @@
-# Wavecrate
+# Amply Studio
 
 A beautiful, local-first media downloader for **Windows 11** — powered by **yt-dlp** and **FFmpeg**.
 
@@ -122,8 +122,8 @@ Diagnostics screen. Development additionally needs Node + Rust.
 # 1. Install frontend dependencies
 npm install
 
-# 2. (Optional) generate icons if you changed scripts/gen-icon.mjs
-npm run gen:icon && npx tauri icon src-tauri/icons/icon.png
+# 2. (Optional) after changing public/logo.png, regenerate the app icons
+powershell -File scripts/create-tauri-icons.ps1; npm run gen:icon
 
 # 3. Install the Rust toolchain (once)
 #    https://rustup.rs — stable profile, MSVC host
@@ -153,12 +153,12 @@ npm run tauri:build
 ```
 
 The installer is written to `src-tauri/target/release/bundle/nsis/`
-(`Wavecrate_<version>_x64-setup.exe`). It is a per-user NSIS installer and does not require
+(`Amply_<version>_x64-setup.exe`). It is a per-user NSIS installer and does not require
 admin rights.
 
 ## Microsoft Store build (MSIX)
 
-The Store ships Wavecrate as an MSIX package, which the Store signs itself, so no
+The Store ships Amply Studio as an MSIX package, which the Store signs itself, so no
 code-signing certificate is needed.
 
 1. Fill in `packaging/msix/store-identity.json` from Partner Center → the app →
@@ -169,12 +169,12 @@ code-signing certificate is needed.
    .\scripts\package-msix.ps1
    ```
 
-   This writes `src-tauri/target/msix/Wavecrate_<version>.0_x64.msix`. Upload that file
+   This writes `src-tauri/target/msix/Amply_<version>.0_x64.msix`. Upload that file
    under *Packages* in the Store submission.
 
 To try the packaged app locally before submitting (requires Windows Developer
-Mode), run `.\scripts\package-msix.ps1 -Dev -Register` and launch **Wavecrate** from
-Start. Remove it afterwards with `Get-AppxPackage Wavecrate.Dev | Remove-AppxPackage`.
+Mode), run `.\scripts\package-msix.ps1 -Dev -Register` and launch **Amply Studio** from
+Start. Remove it afterwards with `Get-AppxPackage Amply.Dev | Remove-AppxPackage`.
 
 Each Store update needs a higher version in `tauri.conf.json` than the last
 submission.
@@ -200,11 +200,11 @@ not start on 22.04.
 
 ```bash
 # Debian/Ubuntu — pulls in ffmpeg automatically
-sudo apt install ./Wavecrate_<version>_amd64.deb
+sudo apt install ./Amply_<version>_amd64.deb
 
 # Or the portable AppImage, which needs no installation
-chmod +x Wavecrate_<version>_amd64.AppImage
-./Wavecrate_<version>_amd64.AppImage
+chmod +x Amply_<version>_amd64.AppImage
+./Amply_<version>_amd64.AppImage
 ```
 
 The `.deb` declares `ffmpeg` as a dependency, so apt installs it for you. The
@@ -248,7 +248,7 @@ persisted queue live in `%APPDATA%\Amen\history.db`. Logs are in
 
 Defaults:
 
-- Output directory: `%USERPROFILE%\Music\Wavecrate` (installs from before the rename keep `Music\Amen`)
+- Output directory: `%USERPROFILE%\Music\Amply` (installs from before the rename keep `Music\Amen`)
 - Filename template: `%(title)s.%(ext)s` (yt-dlp syntax — subdirectories like
   `%(artist)s/%(album)s/%(title)s.%(ext)s` are supported)
 - Format: MP3 · Quality: Best · Overwrite: Skip · Duplicates: Skip

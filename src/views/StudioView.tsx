@@ -597,7 +597,7 @@ export function StudioView() {
                   dragActive ? (dropHasAudio ? "border-studio-accent" : "border-studio-danger") : "border-transparent"
                }`}
             />
-            <img src="/logo.png" alt="Wavecrate" className="w-16 h-16 mb-2 drop-shadow-xl opacity-95 animate-scale-in" />
+            <img src="/logo.png" alt="Amply Studio" className="w-16 h-16 mb-2 drop-shadow-xl opacity-95 animate-scale-in" />
             <h2 className="text-2xl font-semibold tracking-tight">Create something new.</h2>
             <p className="text-studio-text-muted text-[15px] max-w-sm leading-relaxed">
                Bring in an audio file and start shaping the moment — import a

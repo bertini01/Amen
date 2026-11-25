@@ -34,7 +34,7 @@ pub fn open_file(app: tauri::AppHandle, path: String) -> AppResult<()> {
     if !is_openable(&p) {
         return Err(AppError::new(
             "not_openable",
-            "Wavecrate only opens audio, video, image and project files.",
+            "Amply Studio only opens audio, video, image and project files.",
         ));
     }
     // The default app runs outside the MSIX package and sees the real disk.

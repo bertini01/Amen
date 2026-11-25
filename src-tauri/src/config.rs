@@ -1,7 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-pub const APP_NAME: &str = "Wavecrate";
+pub const APP_NAME: &str = "Amply Studio";
+
+/// Music sub-folder that new installs save into (Music\Amply). Kept short: the
+/// display name "Amply Studio" would put a space in every saved path.
+const OUTPUT_FOLDER: &str = "Amply";
 
 /// Folder name for settings, history, logs, tools and cache. The app was
 /// called Amen before; keeping the folder means upgrading users keep their
@@ -127,7 +131,7 @@ fn redirected_path(path: &Path, roaming: &Path, local: &Path, pfn: &str) -> Opti
 /// New installs only: existing settings keep the folder already chosen.
 pub fn default_output_dir() -> PathBuf {
     dirs::audio_dir()
-        .map(|d| d.join(APP_NAME))
+        .map(|d| d.join(OUTPUT_FOLDER))
         .unwrap_or_else(|| PathBuf::from("."))
 }
 

@@ -1,11 +1,11 @@
-# Wavecrate 0.5.0 — Release Notes
+# Amply Studio 0.5.0 — Release Notes
 
-## New name: Wavecrate
+## New name: Amply Studio
 
-Amen Studio is now **Wavecrate**: a crate of sound waves, for collecting music
-and shaping it into your own mixes. The app has a new name, logo and Store
-artwork. Existing installs keep their settings, history, installed tools and
-download folder; new installs save music to `Music\Wavecrate`.
+Amen Studio is now **Amply Studio**: amplify the music you love, with plenty of room
+to shape it into your own mixes. The familiar "A" logo stays. Existing installs
+keep their settings, history, installed tools and download folder; new installs
+save music to `Music\Amply`.
 
 ## Performance
 
@@ -45,6 +45,6 @@ download folder; new installs save music to `Music\Wavecrate`.
 
 ## Store "What's new" text
 
-Amen Studio is now Wavecrate, with a new look. Much lighter on your CPU, both
+Amen Studio is now Amply Studio. Much lighter on your CPU, both
 idle and while playing in the Studio, plus security hardening and updated
 components.

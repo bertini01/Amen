@@ -1,8 +1,8 @@
-# Wavecrate User Guide
+# Amply Studio User Guide
 
-## Welcome to Wavecrate
+## Welcome to Amply Studio
 
-Wavecrate is a premium local audio downloader and studio application for Windows. Download media from supported platforms and compose audio projects—all processed locally on your machine with no cloud services.
+Amply Studio is a premium local audio downloader and studio application for Windows. Download media from supported platforms and compose audio projects—all processed locally on your machine with no cloud services.
 
 ---
 
@@ -10,7 +10,7 @@ Wavecrate is a premium local audio downloader and studio application for Windows
 
 ### First Launch
 
-1. **Install Wavecrate** - Install it from the Microsoft Store (or the Linux package)
+1. **Install Amply Studio** - Install it from the Microsoft Store (or the Linux package)
 2. **Open Diagnostics** - On first launch, go to Settings → Diagnostics
 3. **Install Dependencies** - Click "Install both" to get yt-dlp and FFmpeg
 4. **Wait for completion** - This takes about 30 seconds
@@ -23,16 +23,16 @@ Wavecrate is a premium local audio downloader and studio application for Windows
 ### Quick Download
 
 1. **Copy a URL** - Copy any supported media link (YouTube, SoundCloud, etc.)
-2. **Paste in Wavecrate** - Go to the Home tab, paste the URL
-3. **Click Analyze** - Wavecrate analyzes the media locally
+2. **Paste in Amply Studio** - Go to the Home tab, paste the URL
+3. **Click Analyze** - Amply Studio analyzes the media locally
 4. **Choose format** - Select MP3 (audio) or MP4 (video)
 5. **Choose quality** - Select Best, 320k, 256k, 192k, or 128k for MP3
-6. **Click Download** - Your file downloads to `Music\Wavecrate`
+6. **Click Download** - Your file downloads to `Music\Amply`
 
 ### Search Mode
 
 If you paste a search query instead of a URL:
-- Wavecrate shows up to 5 best results
+- Amply Studio shows up to 5 best results
 - Click one to select it
 - Then download as normal
 
@@ -61,7 +61,7 @@ Audio Studio lets you:
 - Export the final mix
 
 Drag the handle between the waveform and the timeline to give either one more
-room — Wavecrate remembers your preference.
+room — Amply Studio remembers your preference.
 
 ### Import Audio
 
@@ -141,7 +141,7 @@ The player bar always shows what it's about to play — **SOURCE**,
 you're hearing.
 
 1. **Switch to Timeline Mix** - Click **Timeline Mix** in the Playback row
-   (Wavecrate renders a preview automatically the first time, and again whenever
+   (Amply Studio renders a preview automatically the first time, and again whenever
    the timeline changes)
 2. **Play button** - Click Play in the player bar
 3. **Seek** - Click the seek slider, or the timeline ruler, to jump around
@@ -252,9 +252,9 @@ Import file → Select 30s-45s → Create clip → Export
 
 ### Where do my downloads go?
 
-By default: `%USERPROFILE%\Music\Wavecrate` (`Music\Amen` if you installed before the rename)
+By default: `%USERPROFILE%\Music\Amply` (`Music\Amen` if you installed before the rename)
 
-Example: `C:\Users\YourName\Music\Wavecrate\`
+Example: `C:\Users\YourName\Music\Amply\`
 
 ### Can I change the download location?
 
@@ -277,7 +277,7 @@ Yes. Everything happens on your computer. No cloud processing, no data collectio
 
 ### Can I download playlists?
 
-Yes! Paste a playlist URL, and Wavecrate shows all items. Select the ones you want and download them all at once.
+Yes! Paste a playlist URL, and Amply Studio shows all items. Select the ones you want and download them all at once.
 
 ### How do I update yt-dlp?
 
@@ -336,7 +336,7 @@ Go to Diagnostics → "Check for updates" → Update if available
 
 ## Supported Platforms
 
-Wavecrate supports **hundreds of websites** via yt-dlp, including:
+Amply Studio supports **hundreds of websites** via yt-dlp, including:
 
 - YouTube
 - SoundCloud
@@ -352,12 +352,12 @@ Full list: [yt-dlp supported sites](https://github.com/yt-dlp/yt-dlp/blob/master
 
 ## Privacy & Ethics
 
-### What Wavecrate Does
+### What Amply Studio Does
 - Downloads publicly available media
 - Processes everything locally
 - Embeds metadata from the original source
 
-### What Wavecrate Doesn't Do
+### What Amply Studio Doesn't Do
 - Access your accounts without permission
 - Harvest browser cookies automatically
 - Bypass DRM or paywalls
@@ -381,6 +381,6 @@ Full list: [yt-dlp supported sites](https://github.com/yt-dlp/yt-dlp/blob/master
 
 ## Version
 
-**Wavecrate v0.1.0**
+**Amply Studio v0.1.0**
 
 Built with ❤️ for audio creators.

@@ -53,12 +53,12 @@ export function Sidebar() {
          <div className="flex items-center gap-2.5 px-4 pb-4 pt-5">
             <img
                src="/logo.png"
-               alt="Wavecrate"
+               alt="Amply Studio"
                className="h-8 w-8 rounded-lg object-contain shadow-md shadow-blue-500/20"
             />
             <div className="leading-tight">
                <div className="text-[13px] font-semibold tracking-tight text-foreground">
-                  Wave<span className="text-primary">crate</span>
+                  Amply <span className="text-primary">Studio</span>
                </div>
                <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                   Listen · Capture · Create

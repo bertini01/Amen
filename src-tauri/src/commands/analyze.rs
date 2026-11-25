@@ -20,7 +20,7 @@ pub async fn analyze_url(url: String) -> AppResult<AnalyzeResult> {
         return Err(AppError::with_detail(
             "protected_service",
             format!("{service} songs are copy-protected, so they can't be saved directly."),
-            "Type the song name and artist instead. Wavecrate will search for a version you can save.",
+            "Type the song name and artist instead. Amply Studio will search for a version you can save.",
         ));
     }
     tauri::async_runtime::spawn_blocking(move || crate::analyze::analyze_url(&url, true))

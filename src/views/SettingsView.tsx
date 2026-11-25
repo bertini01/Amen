@@ -120,7 +120,7 @@ export function SettingsView() {
          <nav className="w-60 shrink-0 border-r border-border overflow-y-auto py-6 px-3">
             <div className="px-3 pb-4">
                <h1 className="text-lg font-semibold tracking-tight">Settings</h1>
-               <p className="text-xs text-muted-foreground mt-0.5">Configure how Wavecrate works.</p>
+               <p className="text-xs text-muted-foreground mt-0.5">Configure how Amply Studio works.</p>
             </div>
             <div className="space-y-0.5">
                {SECTIONS.map((s) => {

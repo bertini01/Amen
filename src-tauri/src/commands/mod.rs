@@ -61,7 +61,7 @@ pub async fn get_diagnostic_text(
         let settings = config::AppSettings::load();
         let report = crate::tools::detect_dependencies(&settings);
         let mut out = String::new();
-        out.push_str("Wavecrate — Diagnostic Report\n");
+        out.push_str("Amply Studio — Diagnostic Report\n");
         out.push_str("========================================\n");
         out.push_str(&format!(
             "App version: {}\nPlatform: {} ({})\n",

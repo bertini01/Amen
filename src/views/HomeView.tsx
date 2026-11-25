@@ -188,7 +188,7 @@ export function HomeView() {
                What are we listening to today?
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-               Paste a link or search for a song. Wavecrate saves it on your PC, ready
+               Paste a link or search for a song. Amply Studio saves it on your PC, ready
                to play or to remix in the Studio. No account, no cloud.
             </p>
          </div>

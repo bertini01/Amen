@@ -39,7 +39,7 @@ async function assertNoHorizontalOverflow(page: import("@playwright/test").Page,
    ).toBeLessThanOrEqual(overflow.clientWidth + 2); // +2px rounding tolerance
 }
 
-test.describe("Wavecrate — responsive behavior at real desktop window sizes", () => {
+test.describe("Amply Studio — responsive behavior at real desktop window sizes", () => {
    test.afterAll(async ({ page }) => {
       // Leave the window at its default configured size for other tests.
       await resizeWindow(page, 1280, 840);

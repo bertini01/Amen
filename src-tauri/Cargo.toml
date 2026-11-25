@@ -1,8 +1,8 @@
 [package]
-name = "wavecrate"
+name = "amply"
 version = "0.5.0"
-description = "Wavecrate — save the music you love and remix it locally (yt-dlp + FFmpeg)"
-authors = ["Wavecrate"]
+description = "Amply Studio — save the music you love and remix it locally (yt-dlp + FFmpeg)"
+authors = ["Amply Studio"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

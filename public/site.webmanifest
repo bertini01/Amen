@@ -1,5 +1,5 @@
 {
-  "name": "Wavecrate",
+  "name": "Amply Studio",
   "start_url": "/",
   "background_color": "#0a0a11",
   "display": "standalone",
@@ -17,5 +17,5 @@
     }
   ],
   "description": "Save the music you love and remix it locally",
-  "short_name": "Wavecrate"
+  "short_name": "Amply"
 }
