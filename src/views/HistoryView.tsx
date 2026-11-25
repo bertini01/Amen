@@ -70,7 +70,7 @@ export function HistoryView() {
 
    const tidyUp = async () => {
       const ok = await appConfirm(
-         `${misplaced} ${misplaced === 1 ? "song was" : "songs were"} saved inside extra folders because ${misplaced === 1 ? "its title" : "their titles"} contained a slash. Amen will move ${misplaced === 1 ? "it" : "them"} back into your download folder under the full title and remove the folders left empty. Nothing else in those folders is touched.`,
+         `${misplaced} ${misplaced === 1 ? "song was" : "songs were"} saved inside extra folders because ${misplaced === 1 ? "its title" : "their titles"} contained a slash. Wavecrate will move ${misplaced === 1 ? "it" : "them"} back into your download folder under the full title and remove the folders left empty. Nothing else in those folders is touched.`,
          { title: "Tidy up download folders?", confirmLabel: "Tidy up" },
       );
       if (!ok) return;

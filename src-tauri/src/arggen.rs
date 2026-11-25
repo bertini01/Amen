@@ -50,9 +50,6 @@ pub fn build_ytdlp_args(
 ) -> Vec<String> {
     let mut args: Vec<String> = Vec::new();
 
-    // The URL is placed first (matching yt-dlp convention) — it is passed as a
-    // single argument, never through a shell.
-    args.push(job.url.clone());
     args.push("--no-playlist".to_string());
     args.push("--newline".to_string());
     args.push("--progress".to_string());
@@ -139,6 +136,12 @@ pub fn build_ytdlp_args(
 
     args.push("-o".to_string());
     args.push(escape_output_template(&out_template.to_string_lossy()));
+
+    // The URL goes last, after "--": yt-dlp reads any argument starting with
+    // "-" as an option, so a "URL" such as "--exec calc" placed among the
+    // options would run a program. After "--" it can only be a URL.
+    args.push("--".to_string());
+    args.push(job.url.clone());
 
     args
 }
@@ -338,6 +341,18 @@ mod tests {
         let print = args.iter().position(|a| a == "--print").unwrap();
         let no_quiet = args.iter().position(|a| a == "--no-quiet").unwrap();
         assert!(no_quiet > print);
+    }
+
+    #[test]
+    fn url_comes_last_after_end_of_options() {
+        // A hostile "URL" must never be read as an option such as --exec.
+        let mut job = sample_job();
+        job.url = "--exec calc.exe".to_string();
+        let args = build_ytdlp_args(&job, &AppSettings::default(), &tools(), Path::new(r"C:\Music\out.mp3"), false);
+        let n = args.len();
+        assert_eq!(args[n - 2], "--");
+        assert_eq!(args[n - 1], "--exec calc.exe");
+        assert_eq!(args.iter().filter(|a| *a == "--").count(), 1);
     }
 
     #[test]

@@ -92,10 +92,10 @@ export function MusicLinkPanel(props: MusicLinkPanelProps) {
                <div className="mt-auto flex items-start gap-2 rounded-lg bg-muted/60 p-3 text-[12.5px] leading-relaxed text-muted-foreground sm:mt-4">
                   <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   <span>
-                     {link.service} songs are copy-protected, so Amen can't save them directly.
+                     {link.service} songs are copy-protected, so Wavecrate can't save them directly.
                      {isSingle
                         ? " It searched for this song on sites that allow saving. Pick the version that's right."
-                        : " Choose a song below and Amen will find versions you can save."}
+                        : " Choose a song below and Wavecrate will find versions you can save."}
                   </span>
                </div>
             </div>

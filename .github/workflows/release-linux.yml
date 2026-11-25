@@ -60,6 +60,6 @@ jobs:
           find src-tauri/target/release/bundle \( -name '*.deb' -o -name '*.AppImage' \) -exec cp {} out/ \;
           (cd out && sha256sum * > SHA256SUMS.txt)
           gh release view "$TAG" >/dev/null 2>&1 \
-            || gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "Amen Studio $VERSION" \
+            || gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "Wavecrate $VERSION" \
                  --notes "Linux build. See RELEASE_NOTES.md. Verify downloads with SHA256SUMS.txt."
           gh release upload "$TAG" out/* --clobber

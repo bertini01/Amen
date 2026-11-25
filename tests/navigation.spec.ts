@@ -6,7 +6,7 @@ import { test, expect } from "./e2e-fixtures";
  * a cold start. This is the only place these pages were exercised at all —
  * everything else in the suite jumps straight into Audio Studio.
  */
-test.describe("Amen — navigation & app shell", () => {
+test.describe("Wavecrate — navigation & app shell", () => {
    test("all primary nav destinations render their view", async ({ page }) => {
       await page.getByRole("button", { name: "Home" }).click();
       await expect(page.locator("h1, h2").first()).toBeVisible();

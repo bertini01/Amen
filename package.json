@@ -1,9 +1,9 @@
 {
-  "name": "amen",
+  "name": "wavecrate",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
-  "description": "Amen — a local, offline-first media downloader powered by yt-dlp + FFmpeg",
+  "description": "Wavecrate: save the music you love and remix it locally, powered by yt-dlp + FFmpeg",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
@@ -14,7 +14,7 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "tauri": "tauri",
-    "gen:icon": "node scripts/gen-icon.mjs",
+    "gen:icon": "tauri icon packaging/brand/wavecrate-1024.png",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
   },
@@ -24,10 +24,10 @@
     "@radix-ui/react-slot": "^1.1.1",
     "@radix-ui/react-switch": "^1.1.2",
     "@radix-ui/react-tooltip": "^1.1.6",
-    "@tauri-apps/api": "^2.2.0",
-    "@tauri-apps/plugin-clipboard-manager": "^2.2.0",
-    "@tauri-apps/plugin-dialog": "^2.2.0",
-    "@tauri-apps/plugin-opener": "^2.2.5",
+    "@tauri-apps/api": "^2.12.5",
+    "@tauri-apps/plugin-clipboard-manager": "^2.5.0",
+    "@tauri-apps/plugin-dialog": "^2.8.4",
+    "@tauri-apps/plugin-opener": "^2.7.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "immer": "^10.2.0",
@@ -41,7 +41,7 @@
   "devDependencies": {
     "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "^4.0.0",
-    "@tauri-apps/cli": "^2.2.0",
+    "@tauri-apps/cli": "^2.12.6",
     "@types/node": "^20.19.43",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
@@ -49,7 +49,7 @@
     "playwright": "^1.62.1",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.6.3",
-    "vite": "^6.0.0",
-    "vitest": "^4.1.11"
+    "vite": "^6.4.6",
+    "vitest": "^4.1.12"
   }
 }

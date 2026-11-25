@@ -1,12 +1,17 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-pub const APP_NAME: &str = "Amen";
+pub const APP_NAME: &str = "Wavecrate";
+
+/// Folder name for settings, history, logs, tools and cache. The app was
+/// called Amen before; keeping the folder means upgrading users keep their
+/// settings, history and installed tools. Users never browse to it.
+const DATA_FOLDER: &str = "Amen";
 
 /// Roaming config dir: %APPDATA%\Amen
 pub fn app_data_dir() -> PathBuf {
     dirs::config_dir()
-        .map(|d| d.join("Amen"))
+        .map(|d| d.join(DATA_FOLDER))
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
@@ -17,7 +22,7 @@ pub fn logs_dir() -> PathBuf {
 /// Bundled tools: %LOCALAPPDATA%\Amen\tools
 pub fn tools_dir() -> PathBuf {
     dirs::data_local_dir()
-        .map(|d| d.join("Amen").join("tools"))
+        .map(|d| d.join(DATA_FOLDER).join("tools"))
         .unwrap_or_else(|| app_data_dir().join("tools"))
 }
 
@@ -26,7 +31,7 @@ pub fn tools_dir() -> PathBuf {
 /// sign-out on managed machines.
 pub fn cache_dir() -> PathBuf {
     dirs::data_local_dir()
-        .map(|d| d.join("Amen").join("cache"))
+        .map(|d| d.join(DATA_FOLDER).join("cache"))
         .unwrap_or_else(|| app_data_dir().join("cache"))
 }
 
@@ -119,9 +124,10 @@ fn redirected_path(path: &Path, roaming: &Path, local: &Path, pfn: &str) -> Opti
     None
 }
 
+/// New installs only: existing settings keep the folder already chosen.
 pub fn default_output_dir() -> PathBuf {
     dirs::audio_dir()
-        .map(|d| d.join("Amen"))
+        .map(|d| d.join(APP_NAME))
         .unwrap_or_else(|| PathBuf::from("."))
 }
 

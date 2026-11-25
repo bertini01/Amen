@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from "react";
+import { playClock, precisePlayhead } from "@/lib/playClock";
 import type { WaveformData, StudioMarker } from "../lib/studioTypes";
 import { formatTime } from "../lib/studioTime";
 import {
@@ -54,6 +55,9 @@ const PALETTE = {
  * - Shares its time<->pixel model with the Timeline (src/lib/timeAxis.ts)
  * - Selection start/end/duration surfaced both on-canvas and as text
  */
+/** Stable default: a fresh `[]` per render would re-run the paint effect. */
+const NO_MARKERS: NonNullable<WaveformViewProps["markers"]> = [];
+
 export function WaveformView({
    waveform,
    duration,
@@ -62,7 +66,7 @@ export function WaveformView({
    onSelectionChange,
    onSeek,
    playhead = 0,
-   markers = [],
+   markers = NO_MARKERS,
    playing = false,
 }: WaveformViewProps) {
    const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -173,7 +177,28 @@ export function WaveformView({
    // Single authoritative time<->pixel model (shared with the Timeline;
    // see src/lib/timeAxis.ts). The waveform's offset is its manual pan (panX)
    // rather than native scrolling.
-   const axis = createTimeAxis(pxPerSecond, panX);
+   // Memoised: a new axis each render gave timeToPixel a new identity, which
+   // re-ran the canvas paint on every render, i.e. every frame of playback.
+   const axis = useMemo(() => createTimeAxis(pxPerSecond, panX), [pxPerSecond, panX]);
+
+   // The playhead line follows the audio clock every frame by updating its
+   // own transform, without re-rendering this component (see playClock).
+   const playheadRef = useRef<HTMLDivElement>(null);
+   const placePlayhead = useCallback(
+      (time: number) => {
+         const el = playheadRef.current;
+         if (!el) return;
+         const x = axis.toPixel(time);
+         const visible = x >= 0 && x <= canvasWidth;
+         el.style.display = visible ? "" : "none";
+         if (visible) el.style.transform = `translateX(${x - 1}px)`;
+      },
+      [axis, canvasWidth],
+   );
+   useEffect(() => playClock.subscribe(placePlayhead), [placePlayhead]);
+   useLayoutEffect(() => {
+      placePlayhead(precisePlayhead(playhead));
+   });
    const pixelToTime = useCallback((px: number) => axis.toTime(px), [axis]);
    const timeToPixel = useCallback((time: number) => axis.toPixel(time), [axis]);
 
@@ -333,24 +358,9 @@ export function WaveformView({
          ctx.fill();
       }
 
-      // Playhead
-      const playheadX = timeToPixel(playhead);
-      if (playheadX >= 0 && playheadX <= canvasWidth) {
-         ctx.strokeStyle = PALETTE.playhead;
-         ctx.lineWidth = 2;
-         ctx.beginPath();
-         ctx.moveTo(playheadX, 0);
-         ctx.lineTo(playheadX, canvasHeight);
-         ctx.stroke();
-
-         ctx.fillStyle = PALETTE.playhead;
-         ctx.beginPath();
-         ctx.moveTo(playheadX, 0);
-         ctx.lineTo(playheadX - 5, 8);
-         ctx.lineTo(playheadX + 5, 8);
-         ctx.closePath();
-         ctx.fill();
-      }
+      // The playhead is NOT drawn here: it moves every frame during playback,
+      // and repainting the whole waveform 60 times a second just to move one
+      // line cost more than a full CPU core. It is an overlay element below.
    }, [
       waveform,
       canvasWidth,
@@ -359,7 +369,6 @@ export function WaveformView({
       panX,
       selectionStart,
       selectionEnd,
-      playhead,
       markers,
       timeToPixel,
    ]);
@@ -555,7 +564,7 @@ export function WaveformView({
          </div>
 
          {/* Waveform canvas — fills whatever vertical space is left */}
-         <div ref={canvasSlotRef} className="flex-1 min-h-14 min-w-0">
+         <div ref={canvasSlotRef} className="relative flex-1 min-h-14 min-w-0 overflow-hidden">
             <canvas
                ref={canvasRef}
                data-testid="waveform-canvas"
@@ -568,6 +577,21 @@ export function WaveformView({
                onMouseUp={handleMouseUp}
                onMouseLeave={handleMouseUp}
             />
+            {/* Playhead overlay: moved with a transform, so playback only
+                composites this element instead of repainting the canvas. */}
+            {waveform && (
+               <div
+                  ref={playheadRef}
+                  aria-hidden
+                  className="pointer-events-none absolute left-0 top-0 h-full will-change-transform"
+               >
+                  <div className="h-full w-0.5" style={{ backgroundColor: PALETTE.playhead }} />
+                  <div
+                     className="absolute -left-1 top-0 h-0 w-0 border-x-[5px] border-t-8 border-x-transparent"
+                     style={{ borderTopColor: PALETTE.playhead }}
+                  />
+               </div>
+            )}
          </div>
 
          {/* Help text */}

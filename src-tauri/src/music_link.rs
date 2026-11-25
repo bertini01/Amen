@@ -122,7 +122,7 @@ pub fn resolve_spotify(input: &str) -> AppResult<MusicLink> {
     })?;
     let link = parse_entity(&entity, &kind, &format!("https://open.spotify.com/{kind}/{id}"));
     if link.tracks.is_empty() {
-        return Err(AppError::new("spotify_empty", "That Spotify link has no songs Amen can look up."));
+        return Err(AppError::new("spotify_empty", "That Spotify link has no songs Wavecrate can look up."));
     }
     Ok(link)
 }

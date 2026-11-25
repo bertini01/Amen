@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   Builds the release exe (unless -SkipBuild), lays it out with the manifest and
-  icons, indexes resources, and packs src-tauri\target\msix\Amen_<ver>_x64.msix.
+  icons, indexes resources, and packs src-tauri\target\msix\Wavecrate_<ver>_x64.msix.
 
   The package is left UNSIGNED on purpose: the Store signs MSIX packages itself.
 
@@ -29,7 +29,7 @@ $msixDir = Join-Path $root "packaging\msix"
 $outDir = Join-Path $root "src-tauri\target\msix"
 $layout = Join-Path $outDir "layout"
 $icons = Join-Path $root "src-tauri\icons"
-$exe = Join-Path $root "src-tauri\target\release\amen.exe"
+$exe = Join-Path $root "src-tauri\target\release\wavecrate.exe"
 
 # --- Windows SDK tools -------------------------------------------------------
 $sdkBin = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.*" -Directory |
@@ -48,7 +48,7 @@ $version = "$($parts -join '.').0"
 
 # --- Identity -----------------------------------------------------------------
 if ($Dev) {
-    $identity = @{ DisplayName = "Amen (dev)"; IdentityName = "Amen.Dev"; Publisher = "CN=AmenDev"; PublisherDisplayName = "Amen (dev)" }
+    $identity = @{ DisplayName = "Wavecrate (dev)"; IdentityName = "Wavecrate.Dev"; Publisher = "CN=WavecrateDev"; PublisherDisplayName = "Wavecrate (dev)" }
 } else {
     $identity = Get-Content (Join-Path $msixDir "store-identity.json") -Raw | ConvertFrom-Json
     foreach ($key in "DisplayName", "IdentityName", "Publisher", "PublisherDisplayName") {
@@ -114,7 +114,7 @@ if ($LASTEXITCODE -ne 0) { throw "makepri failed." }
 
 # --- Pack ----------------------------------------------------------------------
 $suffix = if ($Dev) { "_dev" } else { "" }
-$package = Join-Path $outDir "Amen_${version}_x64$suffix.msix"
+$package = Join-Path $outDir "Wavecrate_${version}_x64$suffix.msix"
 & $makeappx pack /d $layout /p $package /o | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "makeappx pack failed." }
 Write-Host "Packed $package (version $version, identity $($identity.IdentityName))"

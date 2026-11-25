@@ -17,7 +17,7 @@ Double-click this file:
 
 This will:
   • Start the development server
-  • Launch the Amen app
+  • Launch the Wavecrate app
   • Enable hot reload
 
 First run: 8-10 minutes
@@ -37,7 +37,7 @@ This will:
 Takes: 12-15 minutes
 
 Installer will be at:
-  src-tauri\target\release\bundle\nsis\Amen_0.1.0_x64-setup.exe
+  src-tauri\target\release\bundle\nsis\Wavecrate_<version>_x64-setup.exe
 
 ========================================
   Quick Commands (PowerShell)
@@ -56,7 +56,7 @@ Production:
 The app will:
 1. Compile Rust backend (slow first time)
 2. Build React frontend (fast)
-3. Launch the Amen application
+3. Launch the Wavecrate application
 
 You'll see lots of "Compiling..." messages.
 This is NORMAL. Just wait patiently!

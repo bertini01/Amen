@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Wavecrate mark: sound waves rising out of a record crate.
+       Saturated on purpose: it must read on light and dark backgrounds, and
+       at 16 px in the taskbar. -->
+  <defs>
+    <linearGradient id="bar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6fdcff"/>
+      <stop offset="0.5" stop-color="#2aa4ff"/>
+      <stop offset="1" stop-color="#1463ff"/>
+    </linearGradient>
+    <linearGradient id="crate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2f6bff"/>
+      <stop offset="1" stop-color="#0a2c96"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Inside of the crate (its back wall), seen above the front panel -->
+  <rect x="146" y="452" width="732" height="130" rx="46" fill="#071a52"/>
+
+  <!-- The waveform, rising out of the crate -->
+  <rect x="234" y="372" width="92" height="330" rx="46" fill="url(#bar)"/>
+  <rect x="350" y="232" width="92" height="470" rx="46" fill="url(#bar)"/>
+  <rect x="466" y="96" width="92" height="606" rx="46" fill="url(#bar)"/>
+  <rect x="582" y="232" width="92" height="470" rx="46" fill="url(#bar)"/>
+  <rect x="698" y="372" width="92" height="330" rx="46" fill="url(#bar)"/>
+
+  <!-- Front panel of the crate -->
+  <rect x="112" y="522" width="800" height="406" rx="84" fill="url(#crate)"/>
+  <rect x="112" y="522" width="800" height="170" rx="84" fill="url(#shine)"/>
+  <!-- Carry handle -->
+  <rect x="384" y="596" width="256" height="64" rx="32" fill="#061647" fill-opacity="0.9"/>
+  <!-- Slat line -->
+  <rect x="182" y="800" width="660" height="16" rx="8" fill="#061647" fill-opacity="0.4"/>
+</svg>

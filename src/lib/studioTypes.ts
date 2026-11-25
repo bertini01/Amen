@@ -11,7 +11,7 @@
 // below needs no changes at all to support it.
 //
 // Sampler / live-trigger pads, evaluated and deliberately NOT implemented:
-// Amen is an asynchronous composition tool, not a live-performance one — the
+// Wavecrate is an asynchronous composition tool, not a live-performance one — the
 // underlying need (instant, low-friction preview of any sound) is already
 // served by the Clip Library's per-clip Preview button + the waveform Loop
 // toggle. A dedicated trigger-pad UI would duplicate that, in a form (several

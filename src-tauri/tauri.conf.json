@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Amen",
-  "version": "0.4.0",
+  "productName": "Wavecrate",
+  "version": "0.5.0",
   "identifier": "com.amen.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Amen Studio",
+        "title": "Wavecrate",
         "width": 1280,
         "height": 840,
         "minWidth": 980,
@@ -25,13 +25,29 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' asset: http://asset.localhost https: data: blob:",
+        "media-src": "'self' asset: http://asset.localhost blob:",
+        "connect-src": "ipc: http://ipc.localhost",
+        "font-src": "'self' data:",
+        "manifest-src": "'self'",
+        "object-src": "'none'",
+        "base-uri": "'self'",
+        "frame-src": "'none'",
+        "form-action": "'none'"
+      },
       "assetProtocol": {
         "enable": true,
         "scope": [
           "**"
         ]
-      }
+      },
+      "dangerousDisableAssetCspModification": [
+        "style-src"
+      ]
     }
   },
   "bundle": {
@@ -40,8 +56,8 @@
       "nsis"
     ],
     "category": "Utility",
-    "shortDescription": "Local media downloader powered by yt-dlp + FFmpeg",
-    "longDescription": "Amen downloads media from supported URLs and converts to MP3/MP4 locally using yt-dlp and FFmpeg. Offline-first, no cloud services.",
+    "shortDescription": "Save the music you love and remix it, all on your PC",
+    "longDescription": "Wavecrate saves music and video from supported links as MP3 or MP4 and includes a multi-track audio studio for cutting, arranging and exporting mixes. Everything runs locally with yt-dlp and FFmpeg.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

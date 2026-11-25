@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect, useCallback, useMemo, useLayoutEffect } from "react";
+import { playClock, precisePlayhead } from "@/lib/playClock";
 import { Trash2, Plus, Edit2, Copy, Volume2, VolumeX, Scissors, Magnet, AlignHorizontalJustifyStart } from "lucide-react";
 import type { StudioTrack, StudioTimelineItem, StudioClip } from "../lib/studioTypes";
 import { itemEffectiveDuration } from "../lib/studioTypes";
@@ -315,6 +316,20 @@ export function Timeline({
    const axis = useMemo(() => createTimeAxis(effectivePxPerSecond, 0), [effectivePxPerSecond]);
    const pixelToTime = useCallback((px: number) => axis.toTime(px), [axis]);
    const timeToPixel = useCallback((time: number) => axis.toPixel(time), [axis]);
+
+   // Follows the audio clock every frame without re-rendering the timeline
+   // (see playClock); the store's playhead only updates ~20 times a second.
+   const playheadRef = useRef<HTMLDivElement>(null);
+   useEffect(
+      () =>
+         playClock.subscribe((time) => {
+            const el = playheadRef.current;
+            if (!el) return;
+            el.style.transform = `translateX(${timeToPixel(time)}px)`;
+            el.dataset.playheadSeconds = String(time);
+         }),
+      [timeToPixel],
+   );
 
    const noteManualNav = useCallback(() => {
       lastManualNavRef.current = Date.now();
@@ -693,7 +708,7 @@ export function Timeline({
                <button
                   onClick={() => {
                      if (canSplit && selectedItemTrackId != null && selectedItemIndex != null) {
-                        onSplitItem?.(selectedItemTrackId, selectedItemIndex, playhead);
+                        onSplitItem?.(selectedItemTrackId, selectedItemIndex, precisePlayhead(playhead));
                      }
                   }}
                   disabled={!canSplit}
@@ -942,10 +957,13 @@ export function Timeline({
 
                   {/* Playhead */}
                   <div
+                     ref={playheadRef}
                      data-testid="timeline-playhead"
-                     data-playhead-seconds={playhead}
-                     style={{ left: timeToPixel(playhead) }}
-                     className="absolute top-0 bottom-0 w-px bg-studio-playhead pointer-events-none z-30 shadow-[0_0_8px_rgba(255,84,112,0.6)]"
+                     data-playhead-seconds={precisePlayhead(playhead)}
+                     // transform, not left: moving it every frame of playback then
+                     // only composites this element instead of re-laying out the lane.
+                     style={{ transform: `translateX(${timeToPixel(precisePlayhead(playhead))}px)` }}
+                     className="absolute left-0 top-0 bottom-0 w-px bg-studio-playhead pointer-events-none z-30 shadow-[0_0_8px_rgba(255,84,112,0.6)] will-change-transform"
                   />
 
                   {/* Tracks */}

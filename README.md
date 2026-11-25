@@ -1,4 +1,4 @@
-# Amen
+# Wavecrate
 
 A beautiful, local-first media downloader for **Windows 11** — powered by **yt-dlp** and **FFmpeg**.
 
@@ -153,12 +153,12 @@ npm run tauri:build
 ```
 
 The installer is written to `src-tauri/target/release/bundle/nsis/`
-(`Amen_0.1.0_x64-setup.exe`). It is a per-user NSIS installer and does not require
+(`Wavecrate_<version>_x64-setup.exe`). It is a per-user NSIS installer and does not require
 admin rights.
 
 ## Microsoft Store build (MSIX)
 
-The Store ships Amen as an MSIX package, which the Store signs itself, so no
+The Store ships Wavecrate as an MSIX package, which the Store signs itself, so no
 code-signing certificate is needed.
 
 1. Fill in `packaging/msix/store-identity.json` from Partner Center → the app →
@@ -169,12 +169,12 @@ code-signing certificate is needed.
    .\scripts\package-msix.ps1
    ```
 
-   This writes `src-tauri/target/msix/Amen_<version>.0_x64.msix`. Upload that file
+   This writes `src-tauri/target/msix/Wavecrate_<version>.0_x64.msix`. Upload that file
    under *Packages* in the Store submission.
 
 To try the packaged app locally before submitting (requires Windows Developer
-Mode), run `.\scripts\package-msix.ps1 -Dev -Register` and launch **Amen** from
-Start. Remove it afterwards with `Get-AppxPackage Amen.Dev | Remove-AppxPackage`.
+Mode), run `.\scripts\package-msix.ps1 -Dev -Register` and launch **Wavecrate** from
+Start. Remove it afterwards with `Get-AppxPackage Wavecrate.Dev | Remove-AppxPackage`.
 
 Each Store update needs a higher version in `tauri.conf.json` than the last
 submission.
@@ -200,11 +200,11 @@ not start on 22.04.
 
 ```bash
 # Debian/Ubuntu — pulls in ffmpeg automatically
-sudo apt install ./Amen_0.2.0_amd64.deb
+sudo apt install ./Wavecrate_<version>_amd64.deb
 
 # Or the portable AppImage, which needs no installation
-chmod +x Amen_0.2.0_amd64.AppImage
-./Amen_0.2.0_amd64.AppImage
+chmod +x Wavecrate_<version>_amd64.AppImage
+./Wavecrate_<version>_amd64.AppImage
 ```
 
 The `.deb` declares `ffmpeg` as a dependency, so apt installs it for you. The
@@ -241,13 +241,14 @@ py -m pip install -U yt-dlp
 
 ## Configuration
 
-Settings are stored in `%APPDATA%\Amen\settings.json`. Download history and the
+The data folder is still named `Amen`, the app's former name, so upgrades keep
+settings, history and tools. Settings are stored in `%APPDATA%\Amen\settings.json`. Download history and the
 persisted queue live in `%APPDATA%\Amen\history.db`. Logs are in
 `%APPDATA%\Amen\logs\app.log`.
 
 Defaults:
 
-- Output directory: `%USERPROFILE%\Music\Amen`
+- Output directory: `%USERPROFILE%\Music\Wavecrate` (installs from before the rename keep `Music\Amen`)
 - Filename template: `%(title)s.%(ext)s` (yt-dlp syntax — subdirectories like
   `%(artist)s/%(album)s/%(title)s.%(ext)s` are supported)
 - Format: MP3 · Quality: Best · Overwrite: Skip · Duplicates: Skip

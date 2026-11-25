@@ -1,8 +1,8 @@
 [package]
-name = "amen"
-version = "0.4.0"
-description = "Amen — local media downloader powered by yt-dlp + FFmpeg"
-authors = ["Amen"]
+name = "wavecrate"
+version = "0.5.0"
+description = "Wavecrate — save the music you love and remix it locally (yt-dlp + FFmpeg)"
+authors = ["Wavecrate"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -22,12 +22,12 @@ tauri-plugin-clipboard-manager = "2"
 tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
 dirs = "5"
 uuid = { version = "1", features = ["v4"] }
 regex = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 ureq = { version = "2", features = ["tls", "json"] }
 sysinfo = "0.32"
 

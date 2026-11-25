@@ -6,19 +6,19 @@ test.describe("Diagnostics — real telemetry", () => {
       await page.getByRole("button", { name: "Diagnostics" }).click();
       await page.waitForTimeout(4000); // real dependency checks + first telemetry samples
 
-      await expect(page.getByText("Amen CPU usage")).toBeVisible();
-      await expect(page.getByText("Amen memory usage")).toBeVisible();
+      await expect(page.getByText("Wavecrate CPU usage")).toBeVisible();
+      await expect(page.getByText("Wavecrate memory usage")).toBeVisible();
 
       // The percent/MB readouts must show real numbers, not placeholders.
-      const cpuText = await page.locator("text=Amen CPU usage").locator("../..").locator("span.font-mono").first().textContent();
+      const cpuText = await page.locator("text=Wavecrate CPU usage").locator("../..").locator("span.font-mono").first().textContent();
       expect(cpuText, "CPU readout must show a real percentage, not a placeholder").toMatch(/^\d+(\.\d+)?%$/);
 
-      const memText = await page.locator("text=Amen memory usage").locator("../..").locator("span.font-mono").first().textContent();
+      const memText = await page.locator("text=Wavecrate memory usage").locator("../..").locator("span.font-mono").first().textContent();
       expect(memText, "memory readout must show a real MB value, not a placeholder").toMatch(/^\d+ MB$/);
 
       // The process actually uses non-zero memory — a real, non-fabricated reading.
       const memMb = parseFloat(memText!.replace(" MB", ""));
-      expect(memMb, "Amen's own process must show a real, non-trivial memory footprint").toBeGreaterThan(1);
+      expect(memMb, "Wavecrate's own process must show a real, non-trivial memory footprint").toBeGreaterThan(1);
    });
 
    test("current Studio project statistics reflect the real, live project state", async ({ page }) => {

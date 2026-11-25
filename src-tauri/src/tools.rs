@@ -576,7 +576,10 @@ fn extract_ffmpeg(zip_path: &Path, tools: &Path) -> AppResult<()> {
         let mut entry = archive
             .by_index(i)
             .map_err(|e| AppError::with_detail("extract_failed", "Corrupt FFmpeg archive.", e.to_string()))?;
-        let name = entry.name().replace('\\', "/");
+        let name = entry
+            .name()
+            .map_err(|e| AppError::with_detail("extract_failed", "Corrupt FFmpeg archive.", e.to_string()))?
+            .replace('\\', "/");
         let base = name.rsplit('/').next().unwrap_or("").to_string();
         let lower = base.to_lowercase();
         let target = match lower.as_str() {
@@ -729,6 +732,41 @@ fn interpret_update(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The FFmpeg installer against an archive shaped like gyan.dev's: only
+    /// the two binaries are written, under fixed names, into the tools folder,
+    /// whatever else (or however hostile the paths) the archive contains.
+    #[cfg(windows)]
+    #[test]
+    fn extracts_only_ffmpeg_and_ffprobe() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join(format!("wc-zip-{}", std::process::id()));
+        let tools = dir.join("tools");
+        std::fs::create_dir_all(&tools).unwrap();
+        let zip_path = dir.join("ffmpeg.zip");
+        {
+            let mut w = zip::ZipWriter::new(std::fs::File::create(&zip_path).unwrap());
+            let opts = zip::write::SimpleFileOptions::default();
+            for (name, body) in [
+                ("ffmpeg-7.1-essentials_build/bin/ffmpeg.exe", "ffmpeg"),
+                ("ffmpeg-7.1-essentials_build/bin/ffprobe.exe", "ffprobe"),
+                ("ffmpeg-7.1-essentials_build/bin/ffplay.exe", "ffplay"),
+                ("../../escape.txt", "nope"),
+            ] {
+                w.start_file(name, opts).unwrap();
+                w.write_all(body.as_bytes()).unwrap();
+            }
+            w.finish().unwrap();
+        }
+        extract_ffmpeg(&zip_path, &tools).expect("extracts");
+        assert_eq!(std::fs::read_to_string(tools.join("ffmpeg.exe")).unwrap(), "ffmpeg");
+        assert_eq!(std::fs::read_to_string(tools.join("ffprobe.exe")).unwrap(), "ffprobe");
+        let mut written: Vec<_> = std::fs::read_dir(&tools).unwrap().map(|e| e.unwrap().file_name()).collect();
+        written.sort();
+        assert_eq!(written, ["ffmpeg.exe", "ffprobe.exe"]);
+        assert!(!dir.join("escape.txt").exists() && !std::env::temp_dir().join("escape.txt").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn version_comparison() {

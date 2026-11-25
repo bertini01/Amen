@@ -1,5 +1,5 @@
 {
-  "name": "Amen",
+  "name": "Wavecrate",
   "start_url": "/",
   "background_color": "#0a0a11",
   "display": "standalone",
@@ -16,6 +16,6 @@
       "src": "/android-chrome-512x512.png"
     }
   ],
-  "description": "Premium local audio downloader and studio",
-  "short_name": "Amen"
+  "description": "Save the music you love and remix it locally",
+  "short_name": "Wavecrate"
 }

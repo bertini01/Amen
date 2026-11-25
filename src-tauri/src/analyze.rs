@@ -348,6 +348,9 @@ pub fn analyze_url(url: &str, flat: bool) -> AppResult<AnalyzeResult> {
         args.push("--flat-playlist".to_string());
     }
     
+    // After "--" the target can only be read as a URL or search, never as an
+    // option (see arggen.rs).
+    args.push("--".to_string());
     args.push(target);
 
     let mut cmd = new_command(&ytdlp);

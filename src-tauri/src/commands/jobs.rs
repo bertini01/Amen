@@ -8,7 +8,18 @@ pub fn start_download(
     state: State<'_, Arc<DownloadManager>>,
     request: DownloadRequest,
 ) -> AppResult<Job> {
+    if !is_web_url(&request.url) {
+        return Err(AppError::new("invalid_url", "Only http(s) links can be downloaded."));
+    }
     state.submit(request)
+}
+
+/// Downloads only ever come from analysed web links. Anything else reaching
+/// this command (a file path, a stray option) is refused before yt-dlp sees it.
+fn is_web_url(url: &str) -> bool {
+    let lower = url.trim().to_ascii_lowercase();
+    (lower.starts_with("https://") || lower.starts_with("http://"))
+        && !url.chars().any(char::is_control)
 }
 
 #[tauri::command]
@@ -51,4 +62,19 @@ pub fn validate_output_dir(path: String) -> AppResult<()> {
         )
     })?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_web_url;
+
+    #[test]
+    fn only_web_links_can_be_downloaded() {
+        assert!(is_web_url("https://www.youtube.com/watch?v=x"));
+        assert!(is_web_url("HTTP://example.com/a"));
+        assert!(!is_web_url("--exec calc.exe"));
+        assert!(!is_web_url(r"C:\Windows\System32\calc.exe"));
+        assert!(!is_web_url("file:///etc/passwd"));
+        assert!(!is_web_url("https://x/\nrm"));
+    }
 }

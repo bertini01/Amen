@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { playClock } from "@/lib/playClock";
 import { Play, Pause, SkipBack, Volume2, VolumeX, Zap } from "lucide-react";
 import { formatTime, clamp } from "../lib/studioTime";
 import { assetUrl } from "../lib/api";
@@ -55,6 +56,13 @@ interface PlayerBarProps {
  * - ← →: seek ±5s, Shift+← →: seek ±0.5s
  * - Home/End: jump to start/end, 0-9: jump to 0-90% of duration
  */
+/**
+ * How often, at most, playback writes the playhead into the Studio store.
+ * Well inside the 0.25s re-seek tolerance below even at 2x speed, and a
+ * third of the re-renders that writing every frame caused.
+ */
+const STORE_WRITE_MS = 50;
+
 export function PlayerBar({
    playing,
    playhead,
@@ -156,8 +164,25 @@ export function PlayerBar({
    // the Studio: the waveform playhead, the timeline playhead, the time
    // readout and auto-scroll all read the store value this loop writes, so
    // none of them can invent a position of their own and drift.
+   //
+   // Every frame feeds `playClock` (smooth playhead lines, exact actions); the
+   // store, which re-renders the whole Studio, is written at most every
+   // STORE_WRITE_MS, and always exactly when playback stops, loops or ends.
+   // Latest callbacks, read through refs: the parent passes fresh inline
+   // functions on every render, and listing them as dependencies restarted
+   // this loop (and its cleanup write) on every store update.
+   const onSeekRef = useRef(onSeek);
+   onSeekRef.current = onSeek;
+   const onPauseRef = useRef(onPause);
+   onPauseRef.current = onPause;
+
    useEffect(() => {
       if (!playing) return;
+      let lastWrite = 0;
+      const write = (time: number) => {
+         lastWrite = performance.now();
+         onSeekRef.current?.(time);
+      };
       const loop = () => {
          const audio = audioRef.current;
          if (audio && !audio.paused) {
@@ -168,26 +193,33 @@ export function PlayerBar({
                   // element's position, not a UI approximation, so the next
                   // frame's currentTime read is already correct.
                   audio.currentTime = previewStart;
-                  onSeek?.(previewStart);
+                  playClock.tick(previewStart);
+                  write(previewStart);
                   frameRef.current = requestAnimationFrame(loop);
                   return;
                }
                // Stop exactly at the region's end and leave the playhead
                // there, rather than running on into the rest of the source.
                audio.pause();
-               onSeek?.(previewEnd);
-               onPause?.();
+               playClock.stop();
+               write(previewEnd);
+               onPauseRef.current?.();
                return;
             }
-            onSeek?.(currentTime);
+            playClock.tick(currentTime);
+            if (performance.now() - lastWrite >= STORE_WRITE_MS) write(currentTime);
          }
          frameRef.current = requestAnimationFrame(loop);
       };
       frameRef.current = requestAnimationFrame(loop);
       return () => {
          if (frameRef.current) cancelAnimationFrame(frameRef.current);
+         // Leave the store holding the exact final position.
+         const audio = audioRef.current;
+         if (playClock.running && audio) onSeekRef.current?.(audio.currentTime);
+         playClock.stop();
       };
-   }, [playing, onSeek, onPause, previewStart, previewEnd, looping]);
+   }, [playing, previewStart, previewEnd, looping]);
 
    // Sync an externally-driven seek (a click on the waveform/ruler, a preview
    // starting) onto the element. The 0.25s tolerance is wide enough that the

@@ -1,61 +1,50 @@
-# Amen Studio 0.4.0 — Release Notes
+# Wavecrate 0.5.0 — Release Notes
 
-## New
+## New name: Wavecrate
 
-- **Spotify links.** Spotify music is copy-protected, so it can't be saved
-  directly. Pasting a Spotify song, album or playlist link now shows what it
-  describes (cover, title, artists, length) and searches for versions you can
-  save. Results are ranked by matching length and title, with covers, live and
-  karaoke versions ranked down; you choose. The saved file is named and tagged
-  after the song ("Artist - Title.mp3", with title and artist tags).
-  Other copy-protected services (Apple Music, Tidal, Deezer, Amazon Music) get
-  a clear explanation instead of a cryptic error.
-- **Search by song name.** Typing a song and artist now searches (the button
-  reads "Search"). Before, the button only accepted links, so search was
-  unreachable. Only the top result is pre-selected.
-- **Tidy up download folders.** History offers to move songs that older
-  versions saved into accidental sub-folders back into the download folder,
-  under their full title.
-- **Completion notifications** (Settings → General), and "Start empty" now
-  works.
-- **Drag audio files onto the Audio Studio.**
+Amen Studio is now **Wavecrate**: a crate of sound waves, for collecting music
+and shaping it into your own mixes. The app has a new name, logo and Store
+artwork. Existing installs keep their settings, history, installed tools and
+download folder; new installs save music to `Music\Wavecrate`.
 
-## Fixed
+## Performance
 
-- **Files saved into nested folders.** A "/" in a title created folders
-  ("EP 18 / Song" became "EP 18\Song.mp3"). Titles can no longer create
-  folders or leave the download folder. Names over ~120 characters are
-  shortened at a word with "…", and the full path stays within Windows limits.
-  A "%" in a title no longer garbles the name.
-- **Open in Audio Studio, Open file and Show in folder failing** for titles
-  with emoji: history recorded a path without the emoji. Output is now read as
-  UTF-8, the recorded path is checked against the disk, and existing entries
-  repair themselves.
-- **Download progress never moved and "Processing" never showed.** yt-dlp
-  wrote progress to a stream the app did not read.
-- **"Download again" was silently skipped**, as was saving a video as MP4
-  after its MP3. Duplicates now require the same format and an existing file.
-- Cancel during "Fetching info" was ignored; removing a job while it was
-  fetching brought it back.
-- Copy and Paste failed (missing clipboard permission) while still saying
-  "Copied".
-- Studio playback failed for audio outside the user profile.
-- Settings edits leaked into the app before Save; Theme changes saved them.
-- Your default format/quality was ignored on startup; downloads re-analyzed
-  links already analyzed.
-- Diagnostics: the network check always reported failure; the logs path was
-  wrong; leaving during an install allowed a second, corrupting install;
-  a failed yt-dlp update reported success.
-- Confirmation dialogs only worked inside the Studio (Clear history ran
-  without asking).
-- Errors across the app showed "[object Object]" or nothing; they now give
-  the reason.
+- **Idle CPU: from ~13% of a core to under 1%.** A small status dot in the
+  sidebar pinged forever, and that one endless animation kept the window
+  repainting on every screen.
+- **Studio playback: from ~140% to ~34% of a core.** The waveform was redrawn
+  in full 60 times a second just to move the playhead, and the whole Studio
+  re-rendered every frame. The playhead lines now follow the audio clock on
+  their own, the waveform redraws only when it changes, and the rest of the
+  Studio updates 20 times a second. Split, markers and in/out points still use
+  the exact playback position.
+- The app now honours Windows' "reduce animations" setting.
+
+## Security
+
+- **Content Security Policy**: the app window may only run its own code and
+  only talk to its own backend; it cannot load frames, plugins or remote
+  scripts.
+- **No option smuggling into yt-dlp**: downloads accept only http(s) links, and
+  the link is passed after `--`, so text such as `--exec …` can never be read
+  as a yt-dlp option.
+- **"Open file" only opens media, images, logs and projects**, never programs,
+  scripts, installers or shortcuts.
+- Dependency updates fixing published advisories: rustls / rustls-webpki (TLS
+  certificate checks), SQLite (CVE in the bundled C library, via rusqlite
+  0.43), url and cookie crates, and the zip library used to unpack FFmpeg
+  (2 → 9; the app never used its vulnerable extract functions, and a new test
+  checks that only ffmpeg.exe and ffprobe.exe are ever written). Tauri 2.12
+  and plugins updated to match.
+  `npm audit` and `cargo audit` report no known vulnerabilities in shipped code.
+
+## Linux
+
+- Cancel now stops downloads on Linux (it called a Windows-only command), and
+  Linux builds install exactly the locked dependencies.
 
 ## Store "What's new" text
 
-(Deliberately names no other company's service: Store reviewers can treat
-brand names in listings as a trademark issue.)
-
-Paste a streaming-service link and pick a version you can save. Search songs by name.
-Downloads are named and tagged properly, never in stray folders, with live
-progress. Many fixes across History, Studio, Settings and Diagnostics.
+Amen Studio is now Wavecrate, with a new look. Much lighter on your CPU, both
+idle and while playing in the Studio, plus security hardening and updated
+components.

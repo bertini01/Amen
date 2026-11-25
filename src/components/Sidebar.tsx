@@ -53,12 +53,12 @@ export function Sidebar() {
          <div className="flex items-center gap-2.5 px-4 pb-4 pt-5">
             <img
                src="/logo.png"
-               alt="Amen Studio"
+               alt="Wavecrate"
                className="h-8 w-8 rounded-lg object-contain shadow-md shadow-blue-500/20"
             />
             <div className="leading-tight">
                <div className="text-[13px] font-semibold tracking-tight text-foreground">
-                  Amen <span className="text-primary">Studio</span>
+                  Wave<span className="text-primary">crate</span>
                </div>
                <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                   Listen · Capture · Create
@@ -104,10 +104,9 @@ export function Sidebar() {
          {/* Footer */}
          <div className="border-t border-border/70 px-4 py-3">
             <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-               <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
-               </span>
+               {/* Deliberately still: an endlessly pinging dot kept the window
+                   repainting and cost ~12% of a CPU core while the app sat idle. */}
+               <span className="inline-flex h-2 w-2 rounded-full bg-success ring-2 ring-success/25" />
                Local · Private · Offline
             </div>
          </div>

@@ -36,6 +36,7 @@ import { computeCompositionStats } from "../lib/studioTypes";
 import { appAlert, appChoose, appConfirm, useUiDialogStore } from "../stores/uiDialog";
 import { toast } from "../stores/toast";
 import { errorMessage } from "../lib/utils";
+import { precisePlayhead } from "../lib/playClock";
 
 const AUDIO_FILTERS = [
    { name: "Audio", extensions: [...AUDIO_EXTENSIONS] },
@@ -460,7 +461,7 @@ export function StudioView() {
                store.splitItem(
                   store.selection.selectedItemTrackId,
                   store.selection.selectedItemIndex,
-                  store.playback.playhead,
+                  precisePlayhead(store.playback.playhead),
                );
             }
          }
@@ -471,7 +472,7 @@ export function StudioView() {
          else if ((e.key === "i" || e.key === "o") && !e.ctrlKey && !e.metaKey && !e.altKey) {
             if (!store.selection.selectedSourceId) return;
             e.preventDefault();
-            const t = store.playback.playhead;
+            const t = precisePlayhead(store.playback.playhead);
             if (e.key === "i") {
                const end = store.selection.selectionEnd;
                store.setSelectionStart(t);
@@ -487,7 +488,7 @@ export function StudioView() {
          else if (e.key === "m" && !e.ctrlKey && !e.metaKey && !e.altKey) {
             if (store.selection.selectedSourceId) {
                e.preventDefault();
-               store.addMarker(store.selection.selectedSourceId, store.playback.playhead);
+               store.addMarker(store.selection.selectedSourceId, precisePlayhead(store.playback.playhead));
             }
          }
 
@@ -596,7 +597,7 @@ export function StudioView() {
                   dragActive ? (dropHasAudio ? "border-studio-accent" : "border-studio-danger") : "border-transparent"
                }`}
             />
-            <img src="/logo.png" alt="Amen" className="w-16 h-16 mb-2 drop-shadow-xl opacity-95 animate-scale-in" />
+            <img src="/logo.png" alt="Wavecrate" className="w-16 h-16 mb-2 drop-shadow-xl opacity-95 animate-scale-in" />
             <h2 className="text-2xl font-semibold tracking-tight">Create something new.</h2>
             <p className="text-studio-text-muted text-[15px] max-w-sm leading-relaxed">
                Bring in an audio file and start shaping the moment — import a
@@ -910,7 +911,7 @@ export function StudioView() {
                         {/* Markers — cue-point style bookmarks for navigating this source */}
                         <div className="flex items-center gap-2 bg-studio-panel px-3 py-2 rounded-xl border border-studio-border min-w-0 shrink-0 overflow-x-auto">
                            <button
-                              onClick={() => currentSource && store.addMarker(currentSource.id, store.playback.playhead)}
+                              onClick={() => currentSource && store.addMarker(currentSource.id, precisePlayhead(store.playback.playhead))}
                               className="flex items-center gap-1.5 rounded-md bg-studio-raised hover:bg-white/10 border border-studio-border px-2.5 py-1 text-[11px] font-medium text-studio-text transition shrink-0"
                               title="Add a marker at the current playhead (M)"
                            >
@@ -1131,7 +1132,7 @@ export function StudioView() {
                            <Loader2 size={11} className="ml-1 inline animate-spin" />
                         ) : (
                            store.playback.previewStale && store.playback.mode === "timeline" && (
-                              <span className="ml-1 text-studio-snap animate-pulse">●</span>
+                              <span className="ml-1 text-studio-snap" title="Preview is out of date">●</span>
                            )
                         )}
                      </button>

@@ -137,7 +137,7 @@ export function DiagnosticsView() {
                         Some components are missing
                      </h3>
                      <p className="mt-1 text-sm text-muted-foreground">
-                        Amen needs yt-dlp and FFmpeg to work. You
+                        Wavecrate needs yt-dlp and FFmpeg to work. You
                         can install them automatically from official sources
                         below, or add them to your PATH and re-check.
                      </p>
@@ -271,7 +271,7 @@ export function DiagnosticsView() {
                      }
                      detail={deps.network.error ?? undefined}
                   />
-                  {/* Informational only — Amen never needs Python, so its
+                  {/* Informational only — Wavecrate never needs Python, so its
                       absence is neutral, not a red failure. */}
                   <SimpleCheck
                      icon={Cpu}
@@ -410,7 +410,7 @@ export function DiagnosticsView() {
                         <div className="mb-2 flex items-center justify-between">
                            <div className="flex items-center gap-2 text-sm font-medium">
                               <Cpu className="h-4 w-4 text-muted-foreground" />
-                              Amen CPU usage
+                              Wavecrate CPU usage
                            </div>
                            <span className="font-mono text-sm text-foreground/80">
                               {usageSamples.length > 0 ? `${usageSamples[usageSamples.length - 1].processCpuPercent.toFixed(1)}%` : "—"}
@@ -424,7 +424,7 @@ export function DiagnosticsView() {
                         <div className="mb-2 flex items-center justify-between">
                            <div className="flex items-center gap-2 text-sm font-medium">
                               <HardDrive className="h-4 w-4 text-muted-foreground" />
-                              Amen memory usage
+                              Wavecrate memory usage
                            </div>
                            <span className="font-mono text-sm text-foreground/80">
                               {usageSamples.length > 0 ? `${usageSamples[usageSamples.length - 1].processMemMb.toFixed(0)} MB` : "—"}
